@@ -1,0 +1,5 @@
+[app]
+name = "raudiotap_client"
+stylized-name = "RaudioTap"
+identifier = "com.raudiotap.raudiotap"
+template-pack = "egui"
