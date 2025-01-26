@@ -30,6 +30,10 @@ winit = { version = "0.28", features = ["android-native-activity"] }
 egui_demo_lib = "0.22"
 egui-winit = { version = "0.22", default-features = false }
 egui-wgpu = { version = "0.22", features = [ "winit" ] }
+crossbeam-channel = "0.5.14"
+local-ip-addr = "0.1.1"
+rtrb = "0.3.2"
+cpal = { version = "0.15.2", features = ["oboe-shared-stdcxx"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.13.1"

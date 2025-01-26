@@ -9,8 +9,20 @@ use egui_winit::State;
 
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
-mod gui;
+pub mod gui;
+pub mod utilities {
+    pub mod enmus;
+    pub mod helper_functions;
+}
 
+pub mod components {
+    pub mod audio;
+    pub mod server;
+    pub mod udp_reciver;
+}
+// pub use components::server::Server;
+// use components::audio::Audio;
+// use components::udp_reciver::UdpReciver;
 /// A custom event type for the winit app.
 enum Event {
     RequestRedraw,
@@ -171,7 +183,7 @@ pub fn main() {
         .init();
 
     let event_loop = EventLoopBuilder::with_user_event().build();
-    _main(event_loop);
+    gui::gui_thread(event_loop)
 }
 
 #[allow(dead_code)]

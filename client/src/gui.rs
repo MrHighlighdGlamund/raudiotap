@@ -1,32 +1,72 @@
-use std::sync::{mpsc, Arc, Mutex};
-
-use egui::TextBuffer;
+use crate::components::server::Server;
+use crate::utilities::enmus::GuiMessage;
+use egui::{ScrollArea, TextBuffer};
 use egui_wgpu::winit::Painter;
 use egui_winit::State;
+use std::sync::{mpsc, Arc, Mutex};
 
 use winit::event::Event::*;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
+struct gui_params {
+    underrun_count: u32,
+    message: Vec<String>,
+}
+impl gui_params {
+    fn new() -> Self {
+        Self {
+            underrun_count: 0,
+            message: Vec::new(),
+        }
+    }
+}
 
-
-
-fn gui_build(ctx: &egui::Context) {
+fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_params) {
     egui::CentralPanel::default().show(ctx, |ui| {
-        // Build your GUI here!
-        ui.label("Hello from egui!");
+        if let Ok(msg) = server.recv_message.try_recv() {
+            match msg {
+                GuiMessage::BufferUnderrun => {
+                    gui_params.underrun_count += 1;
+                }
+                GuiMessage::ServerError(msg) => {
+                    gui_params.message.push(msg);
+                }
+                GuiMessage::Log(msg) => {
+                    gui_params.message.push(msg);
+                }
+                _ => println!("Unknown message"),
+            }
+        }
+        let button = ui.add(egui::Button::new("Start"));
+
+
+        if button.clicked() {
+        }
+        ui.group(|ui| {
+            ui.label(format!("Underrun count: {}", gui_params.underrun_count));
+        });
+
+        if !gui_params.message.is_empty() {
+            ui.group(|ui| {
+                // `ui.group` creates a group in the UI
+                ScrollArea::vertical().show(ui, |ui| {
+                    // Create a vertical scroll area
+                    for msg in gui_params.message.iter() {
+                        // Iterate over messages
+                        ui.label(msg); // Display each message as a label
+                    }
+                });
+            });
+        }
     });
 }
 
 pub fn gui_thread(event_loop: EventLoop<Event>) {
-
-
-
-
-
-
-
+    let mut server = Server::new();
+    server.run();
+    let mut gui_params = gui_params::new();
     let ctx = egui::Context::default();
     let repaint_signal = RepaintSignal(std::sync::Arc::new(std::sync::Mutex::new(
         event_loop.create_proxy(),
@@ -67,10 +107,8 @@ pub fn gui_thread(event_loop: EventLoop<Event>) {
             if let Some(window) = window.as_ref() {
                 let raw_input = state.take_egui_input(window);
 
-
                 let full_output = ctx.run(raw_input, |ctx| {
-                    gui_build(&ctx);
-
+                    gui_build(ctx, &mut server, &mut gui_params);
                 });
                 state.handle_platform_output(window, &ctx, full_output.platform_output);
 
