@@ -1,47 +1,63 @@
-use std::sync::Arc;
-
-use byteorder::{LittleEndian, WriteBytesExt};
 use nih_plug::{log::warn, prelude::*};
-use nih_plug_egui::{
-    create_egui_editor,
-    egui::{self, Vec2},
-    resizable_window::ResizableWindow,
-    widgets, EguiState,
-};
-
-
+use std::sync::Arc;
+pub mod gui;
+pub mod utilities {
+    pub mod enmus;
+    pub mod plugin_parameters;
+    pub mod helper_functions;
+}
+pub mod components {
+    pub mod server;
+    pub mod udp_sender;
+    pub mod client;
+}
+use utilities::plugin_parameters::RaudiotapParams;
 
 pub struct Raudiotap {
-    params: Arc<GainParams>,
-}
-
-mod gui;
-#[derive(Params)]
-pub struct GainParams {
-    editor_state: Arc<EguiState>,
-}
-impl Default for GainParams {
-    fn default() -> Self {
-        let (width, height) = (500, 300);
-
-        Self {
-            editor_state: EguiState::from_size(width, height),
-        }
-    }
+    params: Arc<RaudiotapParams>,
+    send_message: crossbeam_channel::Sender<utilities::enmus::GuiMessage>,
+    recv_message: Option<crossbeam_channel::Receiver<utilities::enmus::GuiMessage>>,
+    audio_queue: rtrb::Producer<u8>,
+    udp_sender: components::udp_sender::UdpSender,
+    server: components::server::Server,
+    
 }
 
 impl Default for Raudiotap {
     fn default() -> Self {
-
-
+        let (send_message, recv_message) = crossbeam_channel::unbounded();
+        let recv_message = Some(recv_message);
+        let (audio_queue_p, audio_queue_c) = rtrb::RingBuffer::<u8>::new(96000 * 64);
+        let audio_queue_c = Some(audio_queue_c);
+        let udp_sender = components::udp_sender::UdpSender::new(send_message.clone(), audio_queue_c);
+        let mut server = components::server::Server::new(send_message.clone(), udp_sender.targets_update.clone(), udp_sender.targets_addr_shared.clone());
+        server.run();
         Self {
-            params: Arc::new(GainParams::default()),
+            params: Arc::new(RaudiotapParams::default()),
+            send_message,
+            recv_message,
+            audio_queue: audio_queue_p,
+            udp_sender,
+            server,
         }
     }
 }
 
 impl Plugin for Raudiotap {
-    const NAME: &'static str = "VSTtoNETWORK";
+    // AUDIOCALLBACK
+    fn process(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        _context: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
+        for channel_samples in buffer.iter_samples() {
+            for sample in channel_samples {}
+        }
+        ProcessStatus::Normal
+    }
+    // AUDIOCALLBACK
+    const NAME: &'static str = "Raudiotap";
     const VENDOR: &'static str = "MrHighlighdGlamund";
     const URL: &'static str = "www.golem.de";
     const EMAIL: &'static str = "info@example.com";
@@ -71,7 +87,9 @@ impl Plugin for Raudiotap {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        gui::gui(self, _async_executor)
+        let recv_message = self.recv_message.take();
+
+        gui::gui(self, _async_executor, recv_message)
     }
 
     fn initialize(
@@ -80,20 +98,9 @@ impl Plugin for Raudiotap {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
+        let sample_rate = buffer_config.sample_rate as u32;
+        self.server.sample_rate.store(sample_rate, std::sync::atomic::Ordering::SeqCst);
         true
-    }
-
-    fn process(
-        &mut self,
-        buffer: &mut Buffer,
-        _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
-    ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            for sample in channel_samples {
-            }
-        }
-        ProcessStatus::Normal
     }
 }
 
@@ -115,8 +122,5 @@ impl Vst3Plugin for Raudiotap {
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Tools];
 }
-
-
-
 nih_export_clap!(Raudiotap);
 nih_export_vst3!(Raudiotap);
