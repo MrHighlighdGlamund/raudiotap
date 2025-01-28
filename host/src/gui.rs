@@ -29,7 +29,7 @@ pub fn gui(
     let egui_state = params.editor_state.clone();
     let server = plugin.server.clone();
     let recv_message: crossbeam_channel::Receiver<GuiMessage> = recv_message.take().unwrap();
-
+    let update_targets = Arc::new(AtomicBool::new(false));
 
     create_egui_editor(
         plugin.params.editor_state.clone(),
@@ -46,6 +46,25 @@ pub fn gui(
                     //         _ => println!("Unknown message"),
                     //     }
                     // }
+                    if update_targets.load(Ordering::Relaxed) {
+                        server.targets_addr_shared.lock().unwrap().clear();
+                        for client in server.clients.lock().unwrap().iter_mut() {
+                            if client.is_running {
+                                server
+                                .targets_addr_shared
+                                .lock()
+                                .unwrap()
+                                .push(client.udp_addr);
+                                client.start();
+                            }
+                            else {
+                                client.stop();
+                            }
+                                                    }
+
+                        update_targets.store(false, Ordering::Relaxed);
+                        server.update_udp_thread.store(true, Ordering::Relaxed);
+                    }
 
                     let clients_len = server.clients.lock().unwrap().len();
                     if clients_len != 0 {
@@ -58,10 +77,6 @@ pub fn gui(
                             let clients_panel_size_y = clients_panel_size.y / clients_len as f32
                                 - ui.spacing().item_spacing.y
                                 - 10.0;
-
-                            
-
-
 
                             for client in server.clients.lock().unwrap().iter_mut() {
                                 ui.horizontal(|ui| {
@@ -86,11 +101,8 @@ pub fn gui(
                                         );
 
                                         if client_widgets.clicked() {
-                                            if !client.is_running {
-                                                client.is_running = true;
-                                            } else {
-                                                client.is_running = false;
-                                            }
+                                            update_targets.store(true, Ordering::Relaxed);
+                                            client.is_running = !client.is_running;
                                         }
                                         ui.group(|ui| {
                                             let mut delay_in_ms =

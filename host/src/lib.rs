@@ -3,15 +3,17 @@ use std::sync::Arc;
 pub mod gui;
 pub mod utilities {
     pub mod enmus;
-    pub mod plugin_parameters;
     pub mod helper_functions;
+    pub mod plugin_parameters;
 }
 pub mod components {
+    pub mod client;
     pub mod server;
     pub mod udp_sender;
-    pub mod client;
 }
+use byteorder::{LittleEndian, WriteBytesExt};
 use utilities::plugin_parameters::RaudiotapParams;
+use wavers::ConvertTo;
 
 pub struct Raudiotap {
     params: Arc<RaudiotapParams>,
@@ -20,7 +22,6 @@ pub struct Raudiotap {
     audio_queue: rtrb::Producer<u8>,
     udp_sender: components::udp_sender::UdpSender,
     server: components::server::Server,
-    
 }
 
 impl Default for Raudiotap {
@@ -29,8 +30,13 @@ impl Default for Raudiotap {
         let recv_message = Some(recv_message);
         let (audio_queue_p, audio_queue_c) = rtrb::RingBuffer::<u8>::new(96000 * 64);
         let audio_queue_c = Some(audio_queue_c);
-        let udp_sender = components::udp_sender::UdpSender::new(send_message.clone(), audio_queue_c);
-        let mut server = components::server::Server::new(send_message.clone(), udp_sender.targets_update.clone(), udp_sender.targets_addr_shared.clone());
+        let udp_sender =
+            components::udp_sender::UdpSender::new(send_message.clone(), audio_queue_c);
+        let mut server = components::server::Server::new(
+            send_message.clone(),
+            udp_sender.targets_update.clone(),
+            udp_sender.targets_addr_shared.clone(),
+        );
         server.run();
         Self {
             params: Arc::new(RaudiotapParams::default()),
@@ -52,7 +58,14 @@ impl Plugin for Raudiotap {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         for channel_samples in buffer.iter_samples() {
-            for sample in channel_samples {}
+            for sample in channel_samples {
+                match self.audio_queue.write_chunk_uninit(2) {
+                    Ok(chunk) => {
+                        chunk.fill_from_iter(f32_to_i16(*sample).to_le_bytes());
+                    }
+                    Err(_) => {}
+                }
+            }
         }
         ProcessStatus::Normal
     }
@@ -99,14 +112,19 @@ impl Plugin for Raudiotap {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         let sample_rate = buffer_config.sample_rate as u32;
-        self.server.sample_rate.store(sample_rate, std::sync::atomic::Ordering::SeqCst);
+        self.server
+            .sample_rate
+            .store(sample_rate, std::sync::atomic::Ordering::SeqCst);
         true
     }
 }
+fn f32_to_i16(s: f32) -> i16 {
+    s.convert_to()
+}
 
 impl ClapPlugin for Raudiotap {
-    const CLAP_ID: &'static str = "com.mrhighlightglamund.vstToNetwork";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("vstToNetwork");
+    const CLAP_ID: &'static str = "com.mrhighlightglamund.raudiotap";
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("raudiotap");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[
@@ -118,7 +136,7 @@ impl ClapPlugin for Raudiotap {
 }
 
 impl Vst3Plugin for Raudiotap {
-    const VST3_CLASS_ID: [u8; 16] = *b"1234vstToNetwork";
+    const VST3_CLASS_ID: [u8; 16] = *b"1234567raudiotap";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Tools];
 }

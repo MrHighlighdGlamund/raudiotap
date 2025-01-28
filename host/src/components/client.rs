@@ -25,6 +25,12 @@ impl Client {
             buf: [0u8; 1],
         }
     }
+    pub fn start(&mut self) {
+        self.stream.write_all("START".as_bytes()).unwrap();
+    }
+    pub fn stop(&mut self) {
+        self.stream.write_all("STOP".as_bytes()).unwrap();
+    }
     pub fn still_alive(&mut self) -> bool {
           // self.stream.write(&[0]).is_ok()
           match self.stream.read(&mut self.buf) {

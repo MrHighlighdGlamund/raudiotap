@@ -17,9 +17,10 @@ pub struct Audio {
     pub current_delay: Arc<AtomicU32>,
     pub update_delay: Arc<AtomicBool>,
     pub delete_delay_count: Arc<AtomicU32>,
+    pub sample_rate: Arc<AtomicU32>,
 }
 impl Audio {
-    pub fn run(&mut self, mut audio_queue: rtrb::Consumer<i16>, sample_rate: u32) {
+    pub fn run(&mut self, mut audio_queue: rtrb::Consumer<i16>) {
         let stop_bool = self.stop_bool.clone();
         let update_delay = self.update_delay.clone();
         let delete_delay_count = self.delete_delay_count.clone();
@@ -32,7 +33,7 @@ impl Audio {
             .expect("Failed to get default output device");
         let config = cpal::StreamConfig {
             channels: 2,
-            sample_rate: cpal::SampleRate(sample_rate),
+            sample_rate: cpal::SampleRate(self.sample_rate.load(std::sync::atomic::Ordering::Relaxed)),
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -60,7 +61,7 @@ impl Audio {
                                     *sample = value;
                                 }
                                 Err(_) => loop {
-                                    send_message.send(GuiMessage::BufferUnderrun).unwrap();
+                                    // send_message.send(GuiMessage::BufferUnderrun).unwrap();
 
                                     if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
                                         break;
@@ -102,6 +103,7 @@ impl Audio {
             current_delay: Arc::new(AtomicU32::new(0)),
             update_delay: Arc::new(AtomicBool::new(false)),
             delete_delay_count: Arc::new(AtomicU32::new(0)),
+            sample_rate: Arc::new(AtomicU32::new(0)),
         }
     }
 }

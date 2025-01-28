@@ -17,8 +17,8 @@ pub struct Server {
     stop_thread: Arc<AtomicBool>,
     socket_addr: SocketAddr,
     send_message: crossbeam_channel::Sender<GuiMessage>,
-    update_udp_thread: Arc<AtomicBool>,
-    targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
+    pub update_udp_thread: Arc<AtomicBool>,
+    pub targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
 
     pub clients: Arc<Mutex<Vec<Client>>>,
     pub sample_rate: Arc<AtomicU32>,
@@ -71,6 +71,7 @@ impl Server {
 
         let stop_thread = self.stop_thread.clone();
         let clients = self.clients.clone();
+        let sample_rate = self.sample_rate.clone();
         self.thread_hanle = Some(std::thread::spawn(move || loop {
             let upate_cycle = std::time::Duration::from_secs(2);
             let mut update_time = std::time::Instant::now();
@@ -104,6 +105,11 @@ impl Server {
                                             clients.lock().unwrap().retain_mut(|client| {
                                                 client.udp_addr != client_ip
                                             });
+                                            let message_SR = format!("SAMPLERATE:{}", sample_rate.load(std::sync::atomic::Ordering::Relaxed));
+                                            stream.write_all(message_SR.as_bytes()).unwrap();
+
+
+
                                             let client = Client::new(
                                                 data.to_string(),
                                                 client_ip,
