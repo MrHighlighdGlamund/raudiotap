@@ -4,6 +4,7 @@ use nih_plug_egui::EguiState;
 
 
 
+
 #[derive(Params)]
 pub struct RaudiotapParams {
     pub editor_state: Arc<EguiState>,

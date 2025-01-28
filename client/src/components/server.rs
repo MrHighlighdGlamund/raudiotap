@@ -87,7 +87,9 @@ impl Server {
                                     ))
                                     .unwrap();
                                 audio.stop();
+
                                 udp_reciver.stop();
+
                             }
                             message if message.contains("SAMPLERATE") => {
                                 let new_sample_rate: u32 = match message

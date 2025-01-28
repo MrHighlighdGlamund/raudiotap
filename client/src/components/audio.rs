@@ -62,6 +62,7 @@ impl Audio {
                                 }
                                 Err(_) => loop {
                                     // send_message.send(GuiMessage::BufferUnderrun).unwrap();
+                                    std::thread::sleep(std::time::Duration::from_millis(1));
 
                                     if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
                                         break;

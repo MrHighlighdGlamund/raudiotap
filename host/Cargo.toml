@@ -21,12 +21,3 @@ crossbeam-channel = "0.5.14"
 wavers = "1.5.1"
 eframe = "0.29.1"
 local-ip-addr = "0.1.1"
-# egui = "0.29.1"
-# egui-winit = "0.29.1"
-# eframe-wgpu = "0.29.1"
-# egui-wgpu = "0.29.1"
-# wgpu = "0.16.0"
-# winit = "0.28.5"
-# raw-window-handle = "0.5.2"
-
-

@@ -30,7 +30,7 @@ impl Default for Raudiotap {
         let recv_message = Some(recv_message);
         let (audio_queue_p, audio_queue_c) = rtrb::RingBuffer::<u8>::new(96000 * 64);
         let audio_queue_c = Some(audio_queue_c);
-        let udp_sender =
+        let mut udp_sender =
             components::udp_sender::UdpSender::new(send_message.clone(), audio_queue_c);
         let mut server = components::server::Server::new(
             send_message.clone(),
@@ -38,6 +38,7 @@ impl Default for Raudiotap {
             udp_sender.targets_addr_shared.clone(),
         );
         server.run();
+        udp_sender.run();
         Self {
             params: Arc::new(RaudiotapParams::default()),
             send_message,

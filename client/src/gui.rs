@@ -4,6 +4,8 @@ use egui::{ScrollArea, TextBuffer};
 use egui_wgpu::winit::Painter;
 use egui_winit::State;
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+use std::thread;
 
 use winit::event::Event::*;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
@@ -25,6 +27,7 @@ impl gui_params {
 
 fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_params) {
     egui::CentralPanel::default().show(ctx, |ui| {
+        let duration = std::time::Instant::now();
         if let Ok(msg) = server.recv_message.try_recv() {
             match msg {
                 GuiMessage::BufferUnderrun => {
@@ -41,12 +44,11 @@ fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_para
         }
         let button = ui.add(egui::Button::new("Start"));
 
-
-        if button.clicked() {
-        }
+        if button.clicked() {}
         ui.group(|ui| {
             ui.label(format!("Underrun count: {}", gui_params.underrun_count));
         });
+
 
         if !gui_params.message.is_empty() {
             ui.group(|ui| {
@@ -60,7 +62,11 @@ fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_para
                 });
             });
         }
+
+        thread::sleep(Duration::from_millis(16) - duration.elapsed());
+
     });
+
 }
 
 pub fn gui_thread(event_loop: EventLoop<Event>) {

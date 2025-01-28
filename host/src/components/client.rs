@@ -1,5 +1,8 @@
 use nih_plug::prelude::AtomicF32;
-use std::{io::{Read, Write}, sync::{atomic::AtomicU32, Arc}};
+use std::{
+    io::{Read, Write},
+    sync::{atomic::AtomicU32, Arc},
+};
 
 pub struct Client {
     pub name: String,
@@ -25,19 +28,18 @@ impl Client {
             buf: [0u8; 1],
         }
     }
-    pub fn start(&mut self) {
-        self.stream.write_all("START".as_bytes()).unwrap();
+    pub fn start(&mut self) -> bool {
+        self.stream.write_all("START".as_bytes()).is_ok()
     }
-    pub fn stop(&mut self) {
-        self.stream.write_all("STOP".as_bytes()).unwrap();
+    pub fn stop(&mut self) -> bool {
+        self.stream.write_all("STOP".as_bytes()).is_ok()
     }
     pub fn still_alive(&mut self) -> bool {
-          // self.stream.write(&[0]).is_ok()
-          match self.stream.read(&mut self.buf) {
-              Ok(0) => false,
-              Err(_) => true,
-              _ => true
-          }
-        
+        // self.stream.write(&[0]).is_ok()
+        match self.stream.read(&mut self.buf) {
+            Ok(0) => false,
+            Err(_) => true,
+            _ => true,
+        }
     }
 }

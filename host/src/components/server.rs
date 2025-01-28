@@ -19,8 +19,9 @@ pub struct Server {
     send_message: crossbeam_channel::Sender<GuiMessage>,
     pub update_udp_thread: Arc<AtomicBool>,
     pub targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
+    pub send_client: crossbeam_channel::Sender<Client>,
+    pub recv_client: crossbeam_channel::Receiver<Client>,
 
-    pub clients: Arc<Mutex<Vec<Client>>>,
     pub sample_rate: Arc<AtomicU32>,
 }
 impl Server {
@@ -29,16 +30,17 @@ impl Server {
         update_udp_thread: Arc<AtomicBool>,
         targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
     ) -> Self {
-        let mut clients: Vec<Client> = Vec::new();
+        let (send_client, recv_client) = crossbeam_channel::bounded(100);
         Self {
             socket_addr: "127.0.0.1:8000".parse().unwrap(),
-            clients: Arc::new(Mutex::new(clients)),
             send_message,
             update_udp_thread,
             targets_addr_shared,
             sample_rate: Arc::new(AtomicU32::new(0)),
             thread_hanle: None,
             stop_thread: Arc::new(AtomicBool::new(false)),
+            send_client,
+            recv_client,
         }
     }
     pub fn run(&mut self) {
@@ -70,7 +72,7 @@ impl Server {
             .expect("Failed to set nonblocking");
 
         let stop_thread = self.stop_thread.clone();
-        let clients = self.clients.clone();
+        let send_client = self.send_client.clone();
         let sample_rate = self.sample_rate.clone();
         self.thread_hanle = Some(std::thread::spawn(move || loop {
             let upate_cycle = std::time::Duration::from_secs(2);
@@ -79,13 +81,7 @@ impl Server {
                 if stop_thread.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
-                if update_time.elapsed() > upate_cycle {
-                    clients
-                        .lock()
-                        .unwrap()
-                        .retain_mut(|client| client.still_alive());
-                    update_time = std::time::Instant::now();
-                }
+                
                 std::thread::sleep(std::time::Duration::from_millis(70));
 
                 match stream {
@@ -102,9 +98,7 @@ impl Server {
                                             let mut client_ip = stream.peer_addr().unwrap();
                                             client_ip.set_port(8000);
 
-                                            clients.lock().unwrap().retain_mut(|client| {
-                                                client.udp_addr != client_ip
-                                            });
+                                            
                                             let message_SR = format!("SAMPLERATE:{}", sample_rate.load(std::sync::atomic::Ordering::Relaxed));
                                             stream.write_all(message_SR.as_bytes()).unwrap();
 
@@ -115,7 +109,7 @@ impl Server {
                                                 client_ip,
                                                 stream.try_clone().unwrap(),
                                             );
-                                            clients.lock().unwrap().push(client);
+                                            send_client.send(client).unwrap();
                                         }
                                         _ => {
                                             println!("Unknown command: {}", command);
@@ -143,13 +137,14 @@ impl Clone for Server {
     fn clone(&self) -> Self {
         Self {
             socket_addr: self.socket_addr.clone(),
-            clients: self.clients.clone(),
             send_message: self.send_message.clone(),
             update_udp_thread: self.update_udp_thread.clone(),
             targets_addr_shared: self.targets_addr_shared.clone(),
             sample_rate: self.sample_rate.clone(),
             thread_hanle: None,
             stop_thread: self.stop_thread.clone(),
+            send_client: self.send_client.clone(),
+            recv_client: self.recv_client.clone(),
         }
     }
 }

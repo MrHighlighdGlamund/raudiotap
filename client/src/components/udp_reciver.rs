@@ -19,6 +19,8 @@ impl UdpReciver {
         let update_delay = self.update_delay.clone();
         let add_delay_count = self.add_delay_count.clone();
         let socket = UdpSocket::bind(self.socket_addr).expect("Could not bind to socket");
+        // socket.set_nonblocking(true).unwrap();
+        socket.set_read_timeout(Some(std::time::Duration::from_millis(100))).unwrap();
         self.thread_handle = Some(std::thread::spawn(move || loop {
             if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
@@ -38,7 +40,13 @@ impl UdpReciver {
                 }
                 update_delay.store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            socket.recv_from(&mut buf).unwrap();
+            match socket.recv_from(&mut buf) {
+                Ok(_) => {}
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(3));
+                    
+                }
+            }
             buf.chunks(2).for_each(|chunk| {
                 match audio_queue.push(i16::from_le_bytes(chunk.try_into().unwrap())) {
                     Ok(_) => {}
