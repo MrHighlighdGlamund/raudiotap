@@ -18,7 +18,12 @@ pub struct Client {
     send_message: crossbeam_channel::Sender<GuiMessage>,
 }
 impl Client {
-    pub fn new(name: String, udp_addr: std::net::SocketAddr, stream: std::net::TcpStream, send_message: crossbeam_channel::Sender<GuiMessage>) -> Self {
+    pub fn new(
+        name: String,
+        udp_addr: std::net::SocketAddr,
+        stream: std::net::TcpStream,
+        send_message: crossbeam_channel::Sender<GuiMessage>,
+    ) -> Self {
         stream.set_nonblocking(true).unwrap();
         Self {
             name,
@@ -38,6 +43,14 @@ impl Client {
     pub fn stop(&mut self) -> bool {
         self.stream.write_all("STOP".as_bytes()).is_ok()
     }
+    pub fn new_delay(&mut self) {
+        let update_message = format!(
+            "DELAY:{}",
+            self.delay_in_samples
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        self.stream.write_all(update_message.as_bytes()).unwrap();
+    }
     pub fn still_alive(&mut self) -> bool {
         // self.stream.write(&[0]).is_ok()
         match self.stream.read(&mut self.buf) {
@@ -49,7 +62,8 @@ impl Client {
                     .unwrap();
                 self.is_connected = false;
 
-                false},
+                false
+            }
             Err(_) => true,
             _ => true,
         }

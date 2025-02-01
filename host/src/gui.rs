@@ -160,7 +160,10 @@ pub fn gui(
                                                 .suffix(" ms")
                                                 .speed(0.80),
                                         );
-                                        if result.drag_stopped() {}
+                                        if result.drag_stopped() {
+
+                                            client.new_delay();
+                                        }
 
                                         if result.changed() {
                                             let sample_rate =

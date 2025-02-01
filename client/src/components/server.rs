@@ -171,7 +171,6 @@ impl Server {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to read from server: {}", e);
                         break;
                     }
                 }
