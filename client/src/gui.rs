@@ -1,12 +1,15 @@
 use crate::components::server::Server;
 use crate::utilities::enmus::GuiMessage;
-use egui::{ScrollArea, TextBuffer};
+use egui::{Context, Image, ScrollArea, TextBuffer, TextureHandle};
 use egui_wgpu::winit::Painter;
 use egui_winit::State;
+use image::{GenericImageView, ImageReader};
+use std::io::Cursor;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+const LOGO_BYTES: &'static [u8] = include_bytes!("../assets/logo.png");
 use winit::event::Event::*;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 
@@ -25,7 +28,12 @@ impl gui_params {
     }
 }
 
-fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_params) {
+fn gui_build(
+    ctx: &egui::Context,
+    server: &mut Server,
+    gui_params: &mut gui_params,
+    image: &TextureHandle,
+) {
     egui::CentralPanel::default().show(ctx, |ui| {
         let duration = std::time::Instant::now();
         if let Ok(msg) = server.recv_message.try_recv() {
@@ -45,6 +53,32 @@ fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_para
 
         ui.group(|ui| {
             ui.label(format!("RaudioTap by MrHighlightGlamund"));
+            // let img_size = image.size_vec2();
+            // let img_height = img_size.y;
+            // let img_width = img_size.x;
+
+            // // Get the available width and height
+            // let available_width = ui.available_width();
+            // let available_height = ui.available_height();
+
+            // // Calculate the aspect ratio of the image
+            // let aspect_ratio = img_width as f32 / img_height as f32;
+
+            // // Scale the image to fit the available space while keeping the aspect ratio
+            // let (scaled_width, scaled_height) =
+            //     if available_width / aspect_ratio <= available_height {
+            //         // Scale by width if width-based scaling fits within the height
+            //         (available_width, available_width / aspect_ratio)
+            //     } else {
+            //         // Scale by height if height-based scaling fits within the width
+            //         (available_height * aspect_ratio, available_height)
+            //     };
+            // ui.image(
+            //     image,
+            //     egui::Vec2::new(scaled_width, scaled_height),
+            // );
+
+
         });
 
         ui.group(|ui| {
@@ -76,7 +110,14 @@ pub fn gui_thread(event_loop: EventLoop<Event>) {
     let repaint_signal = RepaintSignal(std::sync::Arc::new(std::sync::Mutex::new(
         event_loop.create_proxy(),
     )));
+    // print current directory and ls
+    // println!("Current directory: {}", std::env::current_dir().unwrap().display());
+    // println!("Files in current directory:");
+    // for entry in std::fs::read_dir(std::env::current_dir().unwrap()).unwrap() {
+    //     println!("{}", entry.unwrap().path().display());
+    // }
 
+    let image = load_image(&ctx);
     ctx.set_request_repaint_callback(move |_| {
         repaint_signal
             .0
@@ -113,7 +154,7 @@ pub fn gui_thread(event_loop: EventLoop<Event>) {
                 let raw_input = state.take_egui_input(window);
 
                 let full_output = ctx.run(raw_input, |ctx| {
-                    gui_build(ctx, &mut server, &mut gui_params);
+                    gui_build(ctx, &mut server, &mut gui_params, &image);
                 });
                 state.handle_platform_output(window, &ctx, full_output.platform_output);
 
@@ -195,4 +236,16 @@ fn create_window<T>(
     window.request_redraw();
 
     window
+}
+fn load_image(ctx: &Context) -> TextureHandle {
+    let img = image::load_from_memory(LOGO_BYTES).expect("Failed to load image");
+
+    let rgba = img.to_rgba8();
+
+    let (width, height) = img.dimensions();
+    ctx.load_texture(
+        "my_image",
+        egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba),
+        Default::default(),
+    )
 }
