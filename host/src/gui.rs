@@ -1,4 +1,7 @@
+use chrono::{Local, Timelike};
+use crossbeam_channel::{Receiver, Sender};
 use std::{
+    fmt::Debug,
     io::Write,
     sync::{
         atomic::{AtomicBool, AtomicI32, Ordering},
@@ -13,7 +16,7 @@ use eframe::egui::Label;
 use nih_plug::{log::warn, prelude::*};
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Align, Direction, FontId, Frame, Layout, TextStyle, Vec2},
+    egui::{self, Align, Direction, FontId, Frame, Layout, ScrollArea, TextStyle, Vec2},
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
@@ -29,6 +32,7 @@ pub fn gui(
     let egui_state = params.editor_state.clone();
     let server = plugin.server.clone();
     let recv_message: crossbeam_channel::Receiver<GuiMessage> = recv_message.take().unwrap();
+    let mut messages: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new())); //Vec<String> = Vec::new();
     let update_targets = Arc::new(AtomicBool::new(false));
     let clients: Arc<Mutex<Vec<Client>>> = Arc::new(Mutex::new(Vec::new()));
     let recv_clients = server.recv_client.clone();
@@ -42,8 +46,42 @@ pub fn gui(
                 .min_size(Vec2::new(500.0, 300.0))
                 .show(egui_ctx, egui_state.as_ref(), |ui| {
                     let mut clients = clients.lock().unwrap();
+                    let mut messages = messages.lock().unwrap();
                     let duration = std::time::Instant::now();
                     refresh_counter.fetch_add(1, Ordering::Relaxed);
+                    recv_message.try_iter().for_each(|msg| match msg {
+                        GuiMessage::Log(msg) => {
+                            let timestamp = chrono::Local::now();
+                            let timestamp = format!(
+                                "{:02}:{:02}:{:02}",
+                                timestamp.hour(),
+                                timestamp.minute(),
+                                timestamp.second()
+                            );
+                            messages.push(format!("Time: {} - {}", timestamp, msg));
+                        }
+                        GuiMessage::ServerError(msg) => {
+                            let timestamp = chrono::Local::now();
+                            let timestamp = format!(
+                                "{:02}:{:02}:{:02}",
+                                timestamp.hour(),
+                                timestamp.minute(),
+                                timestamp.second()
+                            );
+                            messages.push(format!("{} - {}", timestamp, msg));
+                        }
+                        GuiMessage::TextError(msg) => {
+                            let timestamp = chrono::Local::now();
+                            let timestamp = format!(
+                                "{:02}:{:02}:{:02}",
+                                timestamp.hour(),
+                                timestamp.minute(),
+                                timestamp.second()
+                            );
+                            messages.push(format!("Time: {} - {}", timestamp, msg));
+                        }
+                        _ => {}
+                    });
 
                     if refresh_counter.load(Ordering::Relaxed) == 200 {
                         clients.retain_mut(|client| client.still_alive());
@@ -55,7 +93,6 @@ pub fn gui(
                     }
                     if update_targets.load(Ordering::Relaxed) {
                         server.targets_addr_shared.lock().unwrap().clear();
-
                         clients.retain_mut(|client| {
                             if client.is_running {
                                 let sucess = client.start();
@@ -75,7 +112,6 @@ pub fn gui(
                             }
                             true
                         });
-
                         update_targets.store(false, Ordering::Relaxed);
                         server.update_udp_thread.store(true, Ordering::Relaxed);
                     }
@@ -103,7 +139,7 @@ pub fn gui(
                                     };
 
                                     let client_widgets = ui.add_sized(
-                                        Vec2::new(clients_panel_size_x, clients_panel_size_y),
+                                        Vec2::new(clients_panel_size_x, clients_panel_size_y / 2.0),
                                         egui::Button::new(button_label).fill(button_color),
                                     );
 
@@ -146,7 +182,18 @@ pub fn gui(
                             });
                         }
                     });
-
+                    ui.group(|ui| {
+                        ui.label("Logs:");
+                        egui::ScrollArea::vertical()
+                            .max_width(ui.available_width())
+                            .max_height(ui.available_height())
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                for msg in messages.iter() {
+                                    ui.label(msg);
+                                }
+                            });
+                    });
                     thread::sleep(Duration::from_millis(16) - duration.elapsed());
                 });
         },

@@ -46,6 +46,11 @@ impl Server {
     pub fn run(&mut self) {
         match get_local_socket_address() {
             Some(socket_addr) => {
+                self.send_message
+                    .send(GuiMessage::ServerError(format!(
+                        "Successfully got TCP Socket address: {}",
+                        socket_addr
+                )));
                 self.socket_addr = socket_addr;
             }
             None => {
@@ -74,6 +79,7 @@ impl Server {
         let stop_thread = self.stop_thread.clone();
         let send_client = self.send_client.clone();
         let sample_rate = self.sample_rate.clone();
+        let send_message = self.send_message.clone();
         self.thread_hanle = Some(std::thread::spawn(move || loop {
             let upate_cycle = std::time::Duration::from_secs(2);
             let mut update_time = std::time::Instant::now();
@@ -94,9 +100,13 @@ impl Server {
                                     match command {
                                         "CONNECT" => {
                                             let data = message.split(":").collect::<Vec<&str>>()[1];
-                                            println!("CONNECT: {}", data);
                                             let mut client_ip = stream.peer_addr().unwrap();
                                             client_ip.set_port(8000);
+                                            send_message
+                                                .send(GuiMessage::ServerError(
+                                                    "Client connected: ".to_string() + &client_ip.to_string(),
+                                                ))
+                                                .unwrap();
 
                                             
                                             let message_SR = format!("SAMPLERATE:{}", sample_rate.load(std::sync::atomic::Ordering::Relaxed));
@@ -108,11 +118,11 @@ impl Server {
                                                 data.to_string(),
                                                 client_ip,
                                                 stream.try_clone().unwrap(),
+                                                send_message.clone(),
                                             );
                                             send_client.send(client).unwrap();
                                         }
                                         _ => {
-                                            println!("Unknown command: {}", command);
                                         }
                                     }
                                 }
