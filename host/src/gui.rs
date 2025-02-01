@@ -58,7 +58,7 @@ pub fn gui(
                                 timestamp.minute(),
                                 timestamp.second()
                             );
-                            messages.push(format!("Time: {} - {}", timestamp, msg));
+                            messages.push(format!("{} - {}", timestamp, msg));
                         }
                         GuiMessage::ServerError(msg) => {
                             let timestamp = chrono::Local::now();
@@ -78,7 +78,7 @@ pub fn gui(
                                 timestamp.minute(),
                                 timestamp.second()
                             );
-                            messages.push(format!("Time: {} - {}", timestamp, msg));
+                            messages.push(format!("{} - {}", timestamp, msg));
                         }
                         _ => {}
                     });
@@ -188,6 +188,7 @@ pub fn gui(
                             .max_width(ui.available_width())
                             .max_height(ui.available_height())
                             .auto_shrink([false; 2])
+                            .stick_to_bottom(true)
                             .show(ui, |ui| {
                                 for msg in messages.iter() {
                                     ui.label(msg);

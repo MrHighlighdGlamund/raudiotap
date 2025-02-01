@@ -4,8 +4,8 @@ use egui::{ScrollArea, TextBuffer};
 use egui_wgpu::winit::Painter;
 use egui_winit::State;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 use winit::event::Event::*;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
@@ -42,31 +42,30 @@ fn gui_build(ctx: &egui::Context, server: &mut Server, gui_params: &mut gui_para
                 _ => println!("Unknown message"),
             }
         }
-        let button = ui.add(egui::Button::new("Start"));
 
-        if button.clicked() {}
         ui.group(|ui| {
-            ui.label(format!("Underrun count: {}", gui_params.underrun_count));
+            ui.label(format!("RaudioTap by MrHighlightGlamund"));
         });
 
-
-        if !gui_params.message.is_empty() {
-            ui.group(|ui| {
-                // `ui.group` creates a group in the UI
-                ScrollArea::vertical().show(ui, |ui| {
+        ui.group(|ui| {
+            ui.label(format!("Logs:"));
+            // `ui.group` creates a group in the UI
+            ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .auto_shrink([false; 2])
+                .max_height(ui.available_height())
+                .max_width(ui.available_width())
+                .show(ui, |ui| {
                     // Create a vertical scroll area
                     for msg in gui_params.message.iter() {
                         // Iterate over messages
                         ui.label(msg); // Display each message as a label
                     }
                 });
-            });
-        }
+        });
 
         thread::sleep(Duration::from_millis(16) - duration.elapsed());
-
     });
-
 }
 
 pub fn gui_thread(event_loop: EventLoop<Event>) {

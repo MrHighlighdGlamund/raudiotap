@@ -71,25 +71,7 @@ impl UdpSender {
                     targets.push(*target);
                 }
                 targets_live = !targets.is_empty();
-                let mut queue_count: usize = 0;
-
-                loop {
-                    match audio_queue.pop() {
-                        Ok(_) => {
-                            queue_count += 1;
-                            
-                        }
-                        Err(_) => {
-                            break;
-                        }
-                    }
-                }
-                send_message
-                    .send(GuiMessage::Log(format!(
-                        "Audio queue size: {}",
-                        queue_count
-                    )))
-                    .unwrap();
+                while audio_queue.pop().is_ok(){};
 
                 targets_update.store(false, std::sync::atomic::Ordering::Relaxed);
             }
@@ -106,6 +88,9 @@ impl UdpSender {
                     }
                 }
                 buffer.clear();
+            }
+            else {
+                std::thread::sleep(std::time::Duration::from_millis(16));
             }
         });
     }
