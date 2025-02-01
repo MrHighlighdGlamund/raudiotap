@@ -25,7 +25,7 @@ impl Audio {
         let update_delay = self.update_delay.clone();
         let delete_delay_count = self.delete_delay_count.clone();
         let send_message = self.send_message.clone();
-        
+
         let host = cpal::default_host();
         let (mut prod, mut consum) = rtrb::RingBuffer::<i16>::new(96000 * 64);
         let device = host
@@ -33,7 +33,9 @@ impl Audio {
             .expect("Failed to get default output device");
         let config = cpal::StreamConfig {
             channels: 2,
-            sample_rate: cpal::SampleRate(self.sample_rate.load(std::sync::atomic::Ordering::Relaxed)),
+            sample_rate: cpal::SampleRate(
+                self.sample_rate.load(std::sync::atomic::Ordering::Relaxed),
+            ),
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -60,20 +62,21 @@ impl Audio {
                                 Ok(value) => {
                                     *sample = value;
                                 }
-                                Err(_) => loop {
-                                    // send_message.send(GuiMessage::BufferUnderrun).unwrap();
-                                    std::thread::sleep(std::time::Duration::from_millis(1));
+                                Err(_) =>  {
+                                    *sample = 0;
+                                    // // send_message.send(GuiMessage::BufferUnderrun).unwrap();
+                                    // std::thread::sleep(std::time::Duration::from_millis(1));
 
-                                    if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
-                                        break;
-                                    }
-                                    match audio_queue.pop() {
-                                        Ok(value) => {
-                                            *sample = value;
-                                            break;
-                                        }
-                                        Err(_) => {}
-                                    }
+                                    // if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
+                                    //     break;
+                                    // }
+                                    // match audio_queue.pop() {
+                                    //     Ok(value) => {
+                                    //         *sample = value;
+                                    //         break;
+                                    //     }
+                                    //     Err(_) => {}
+                                    // }
                                 },
                             }
                         }

@@ -1,5 +1,6 @@
 use crate::utilities::enmus::GuiMessage;
 use std::{
+    io::Read,
     sync::{atomic::AtomicBool, Arc},
     thread,
 };
@@ -62,6 +63,7 @@ impl UdpSender {
         let targets_addr_shared = self.targets_addr_shared.clone();
         let mut buffer: Vec<u8> = vec![0; 512];
         let mut targets_live = false;
+        let send_message = self.send_message.clone();
         thread::spawn(move || loop {
             if targets_update.load(std::sync::atomic::Ordering::Relaxed) {
                 targets.clear();
@@ -69,7 +71,26 @@ impl UdpSender {
                     targets.push(*target);
                 }
                 targets_live = !targets.is_empty();
-                while audio_queue.pop().is_err() {}
+                let mut queue_count: usize = 0;
+
+                loop {
+                    match audio_queue.pop() {
+                        Ok(_) => {
+                            queue_count += 1;
+                            
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
+                }
+                send_message
+                    .send(GuiMessage::Log(format!(
+                        "Audio queue size: {}",
+                        queue_count
+                    )))
+                    .unwrap();
+
                 targets_update.store(false, std::sync::atomic::Ordering::Relaxed);
             }
             if targets_live {
@@ -85,10 +106,6 @@ impl UdpSender {
                     }
                 }
                 buffer.clear();
-            }
-            else {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                while audio_queue.pop().is_err() {};
             }
         });
     }

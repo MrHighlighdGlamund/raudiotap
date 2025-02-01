@@ -77,7 +77,7 @@ impl Server {
 
                                 let (producer, consumer) = rtrb::RingBuffer::<i16>::new(96000 * 64);
                                 audio.run(consumer);
-                                std::thread::sleep(std::time::Duration::from_millis(300));
+                                // std::thread::sleep(std::time::Duration::from_millis(300));
                                 udp_reciver.run(producer);
                             }
                             msg if msg.contains("STOP") => {

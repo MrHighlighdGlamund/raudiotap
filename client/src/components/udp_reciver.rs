@@ -43,8 +43,6 @@ impl UdpReciver {
             match socket.recv_from(&mut buf) {
                 Ok(_) => {}
                 Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(3));
-                    
                 }
             }
             buf.chunks(2).for_each(|chunk| {

@@ -194,7 +194,6 @@ pub fn gui(
                                 }
                             });
                     });
-                    thread::sleep(Duration::from_millis(16) - duration.elapsed());
                 });
         },
     )

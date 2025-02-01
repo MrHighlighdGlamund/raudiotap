@@ -112,6 +112,7 @@ impl Plugin for Raudiotap {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
+        println!("sample rate");
         let sample_rate = buffer_config.sample_rate as u32;
         self.server
             .sample_rate
