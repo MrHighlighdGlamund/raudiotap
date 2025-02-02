@@ -9,7 +9,7 @@ android {
     compileSdk = 33
     defaultConfig {
         applicationId = "com.raudiotap.raudiotap"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 33
         versionCode = 1
         versionName = "1.0"
@@ -52,4 +52,6 @@ rust {
 
 dependencies {
     implementation("com.google.android.material:material:1.8.0")
+implementation(files("libs/raud_service-release.aar"))
+
 }

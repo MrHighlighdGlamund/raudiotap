@@ -1,5 +1,9 @@
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
+use ndk_context::android_context;
+use jni::objects::{JClass, JObject, JString, JValue};
+use jni::JNIEnv;
+
 
 use winit::event::Event::*;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
@@ -195,6 +199,13 @@ fn android_main(app: AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Warn),
     );
+    let android_context = android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(android_context.vm().cast()) }.unwrap();
+    let mut env = vm.attach_current_thread().unwrap();
+
+    // Get the Activity
+    let context = unsafe { JObject::from_raw(android_context.context().cast()) };
+    start_foreground_service(&mut env, context);
 
     let event_loop = EventLoopBuilder::with_user_event()
         .with_android_app(app)
@@ -202,4 +213,79 @@ fn android_main(app: AndroidApp) {
     stop_unwind(|| gui::gui_thread(event_loop));
 }
 
+#[no_mangle]
+pub extern "C" fn Java_com_example_raud_1service_RustCall_start_1audio_1service(env: JNIEnv, _: JObject) {
+    std::thread::spawn(|| loop {
+        // Your Rust audio playback logic here
+        println!("Audio service started");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn Java_com_example_raud_1service_RustCall_stop_1audio_1service(env: JNIEnv, _: JObject) {
+    // Implementation of the start_audio_service function
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+    println!("Audio service stopped");
+}
+pub extern "C" fn stop_audio_service() {
+}
+fn start_foreground_service(env: &mut JNIEnv, context: JObject) {
+let class_loader = env
+        .call_method(
+            &context,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+            &[],
+        )
+        .expect("Failed to get ClassLoader")
+        .l()
+        .unwrap();
+
+let service_class = env
+        .call_method(
+            &class_loader,
+            "loadClass",
+            "(Ljava/lang/String;)Ljava/lang/Class;",
+            &[JValue::Object(&env.new_string("com/example/raud_service/RaudServ").unwrap())],
+        )
+        .expect("Failed to load RaudServ class")
+        .l()
+        .unwrap();
+
+    let service_class_obj = JObject::from(service_class);
+
+
+let intent = env
+        .new_object("android/content/Intent", "()V", &[])
+        .expect("Failed to create new Intent object");
+
+    env.call_method(
+        &intent,
+        "setClass",
+        "(Landroid/content/Context;Ljava/lang/Class;)Landroid/content/Intent;",
+        &[JValue::Object(&context), JValue::Object(&service_class_obj)],
+    )
+    .expect("Failed to set class for Intent");
+
+    env.call_method(
+        &context,
+        "startService",
+        "(Landroid/content/Intent;)Landroid/content/ComponentName;",
+        &[JValue::Object(&intent)],
+    )
+    .expect("Failed to start service");
+
+
+}
 
