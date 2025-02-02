@@ -30,13 +30,14 @@ impl gui_params {
 
 fn gui_build(
     ctx: &egui::Context,
-    server: &mut Server,
+    sender: &mut crossbeam_channel::Sender<GuiMessage>,
+    receiver: &mut crossbeam_channel::Receiver<GuiMessage>,
     gui_params: &mut gui_params,
     image: &TextureHandle,
 ) {
     egui::CentralPanel::default().show(ctx, |ui| {
         let duration = std::time::Instant::now();
-        if let Ok(msg) = server.recv_message.try_recv() {
+        if let Ok(msg) = receiver.try_recv() {
             match msg {
                 GuiMessage::BufferUnderrun => {
                     gui_params.underrun_count += 1;
@@ -102,20 +103,16 @@ fn gui_build(
     });
 }
 
-pub fn gui_thread(event_loop: EventLoop<Event>) {
-    let mut server = Server::new();
-    server.run();
+pub fn gui_thread(event_loop: EventLoop<Event>, sender: crossbeam_channel::Sender<GuiMessage>, receiver: crossbeam_channel::Receiver<GuiMessage>) {
+    // let mut server = Server::new();
+    // server.run();
     let mut gui_params = gui_params::new();
+    let mut sender = sender.clone();
+    let mut receiver = receiver.clone();
     let ctx = egui::Context::default();
     let repaint_signal = RepaintSignal(std::sync::Arc::new(std::sync::Mutex::new(
         event_loop.create_proxy(),
     )));
-    // print current directory and ls
-    // println!("Current directory: {}", std::env::current_dir().unwrap().display());
-    // println!("Files in current directory:");
-    // for entry in std::fs::read_dir(std::env::current_dir().unwrap()).unwrap() {
-    //     println!("{}", entry.unwrap().path().display());
-    // }
 
     let image = load_image(&ctx);
     ctx.set_request_repaint_callback(move |_| {
@@ -154,7 +151,7 @@ pub fn gui_thread(event_loop: EventLoop<Event>) {
                 let raw_input = state.take_egui_input(window);
 
                 let full_output = ctx.run(raw_input, |ctx| {
-                    gui_build(ctx, &mut server, &mut gui_params, &image);
+                    gui_build(ctx, &mut sender, &mut receiver, &mut gui_params, &image);
                 });
                 state.handle_platform_output(window, &ctx, full_output.platform_output);
 

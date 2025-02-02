@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use local_ip_addr::get_local_ip_address;
@@ -13,8 +14,9 @@ pub struct Server {
     pub ip_socket_local: std::net::SocketAddr,
     test_ips: Arc<Vec<std::net::SocketAddr>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
-    send_message: Arc<crossbeam_channel::Sender<GuiMessage>>,
-    pub recv_message: Arc<crossbeam_channel::Receiver<GuiMessage>>,
+    send_message: crossbeam_channel::Sender<GuiMessage>,
+    pub recv_message: crossbeam_channel::Receiver<GuiMessage>,
+    stop_bool: Arc<AtomicBool>,
 }
 impl Server {
     pub fn run(&mut self) {
@@ -22,6 +24,7 @@ impl Server {
         let test_ips = self.test_ips.clone();
         let mut tcp_stream: Option<std::net::TcpStream> = None;
         let send_message = self.send_message.clone();
+        let stop_bool = self.stop_bool.clone();
 
         self.thread_handle = Some(std::thread::spawn(move || {
             let mut audio = Audio::new(send_message.clone());
@@ -54,8 +57,15 @@ impl Server {
             // Connected to Host
 
             let mut tcp_stream = tcp_stream.take().expect("tcp_stream is none");
+            tcp_stream
+                .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+                .unwrap();
+
+            let mut buffer = [0; 512];
             loop {
-                let mut buffer = [0; 512];
+                if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
                 match tcp_stream.read(&mut buffer) {
                     Ok(0) => {
                         send_message
@@ -89,7 +99,6 @@ impl Server {
                                 audio.stop();
 
                                 udp_reciver.stop();
-
                             }
                             message if message.contains("SAMPLERATE") => {
                                 let new_sample_rate: u32 = match message
@@ -108,7 +117,8 @@ impl Server {
                                         continue;
                                     }
                                 };
-                                audio.sample_rate
+                                audio
+                                    .sample_rate
                                     .store(new_sample_rate, std::sync::atomic::Ordering::Relaxed);
                                 send_message
                                     .send(GuiMessage::Log(
@@ -171,7 +181,7 @@ impl Server {
                         }
                     }
                     Err(e) => {
-                        break;
+                        // break;
                     }
                 }
             }
@@ -179,10 +189,14 @@ impl Server {
     }
     pub fn stop(&mut self) {}
 
-    pub fn new() -> Self {
-        let (send_message, recv_message) = crossbeam_channel::bounded::<GuiMessage>(1000);
-        let send_message: Arc<crossbeam_channel::Sender<GuiMessage>> = Arc::new(send_message);
-        let recv_message: Arc<crossbeam_channel::Receiver<GuiMessage>> = Arc::new(recv_message);
+    pub fn new(
+        send_message: crossbeam_channel::Sender<GuiMessage>,
+        recv_message: crossbeam_channel::Receiver<GuiMessage>,
+        stop_bool: Arc<AtomicBool>,
+    ) -> Self {
+        // let (send_message, recv_message) = crossbeam_channel::bounded::<GuiMessage>(1000);
+        // let send_message: Arc<crossbeam_channel::Sender<GuiMessage>> = Arc::new(send_message);
+        // let recv_message: Arc<crossbeam_channel::Receiver<GuiMessage>> = Arc::new(recv_message);
 
         let audio = Audio::new(send_message.clone());
         let udp_reciver = UdpReciver::new(send_message.clone());
@@ -217,11 +231,7 @@ impl Server {
             thread_handle: None,
             send_message,
             recv_message,
+            stop_bool,
         }
-    }
-}
-impl Default for Server {
-    fn default() -> Self {
-        Self::new()
     }
 }
