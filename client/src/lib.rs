@@ -1,9 +1,9 @@
 use components::server::Server;
 use egui_wgpu::wgpu;
 use egui_winit::winit;
-use utilities::enmus::GuiMessage;
-use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, OnceLock};
+use utilities::enmus::GuiMessage;
 
 use jni::{objects::JObject, sys::JNIEnv};
 // use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
@@ -54,7 +54,6 @@ fn initialize_channels() {
     {}
 }
 
-
 #[allow(dead_code)]
 #[cfg(target_os = "android")]
 #[no_mangle]
@@ -80,27 +79,41 @@ fn android_main(app: AndroidApp) {
         .build();
     // _main(event_loop);
     gui::gui_thread(
-            event_loop,
-            CHANNEL_TO_SERVER.get().unwrap().0.clone(),
-            CHANNEL_TO_GUI.get().unwrap().1.clone(),
-            STOP_BACKGROUND_SERVICE.get().unwrap().clone(),
-        );
-
+        event_loop,
+        CHANNEL_TO_SERVER.get().unwrap().0.clone(),
+        CHANNEL_TO_GUI.get().unwrap().1.clone(),
+        STOP_BACKGROUND_SERVICE.get().unwrap().clone(),
+    );
 }
 
 #[allow(dead_code)]
 #[cfg(not(target_os = "android"))]
 fn main() {
+    initialize_channels();
     env_logger::builder()
         .filter_level(log::LevelFilter::Warn) // Default Log Level
         .parse_default_env()
         .init();
 
-    let event_loop = EventLoopBuilder::with_user_event().build();
-    _main(event_loop);
+    let mut server = Server::new(
+        CHANNEL_TO_GUI.get().unwrap().0.clone(),
+        CHANNEL_TO_SERVER.get().unwrap().1.clone(),
+        STOP_BACKGROUND_SERVICE.get().unwrap().clone(),
+    );
+    server.run();
+    let event_loop = winit::event_loop::EventLoopBuilder::with_user_event().build();
+    gui::gui_thread(
+        event_loop,
+        CHANNEL_TO_SERVER.get().unwrap().0.clone(),
+        CHANNEL_TO_GUI.get().unwrap().1.clone(),
+        STOP_BACKGROUND_SERVICE.get().unwrap().clone(),
+    );
 }
 #[no_mangle]
-pub extern "C" fn Java_com_glamund_raudiotap_RustCall_start_1audio_1service(env: JNIEnv, _: JObject) {
+pub extern "C" fn Java_com_glamund_raudiotap_RustCall_start_1audio_1service(
+    env: JNIEnv,
+    _: JObject,
+) {
     initialize_channels();
     let mut server = Server::new(
         CHANNEL_TO_GUI.get().unwrap().0.clone(),
@@ -111,7 +124,10 @@ pub extern "C" fn Java_com_glamund_raudiotap_RustCall_start_1audio_1service(env:
 }
 
 #[no_mangle]
-pub extern "C" fn Java_com_glamund_raudiotap_RustCall_stop_1audio_1service(env: JNIEnv, _: JObject) {
+pub extern "C" fn Java_com_glamund_raudiotap_RustCall_stop_1audio_1service(
+    env: JNIEnv,
+    _: JObject,
+) {
     STOP_BACKGROUND_SERVICE
         .get()
         .unwrap()
