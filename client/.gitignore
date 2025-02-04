@@ -8,7 +8,6 @@
 .externalNativeBuild
 .cxx
 local.properties
-*.so
 
 
 # Added by cargo
