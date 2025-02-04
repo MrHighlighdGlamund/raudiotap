@@ -15,12 +15,22 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+    signingConfigs {
+        release {
+            storeFile file("keystore.jks") // Replace with your actual keystore file
+            storePassword "ernaerna" // Store securely, avoid hardcoding
+            keyAlias "Glamund"
+            keyPassword "ernaerna"
+        }
+    }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
+       
         debug {
             minifyEnabled false
             //packagingOptions {
