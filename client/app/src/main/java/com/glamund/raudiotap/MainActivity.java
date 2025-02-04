@@ -67,14 +67,10 @@ public class MainActivity extends GameActivity {
         startService(serviceIntent);
 
     }
-    @Override
-protected void onStop() {
-    super.onStop();
-    Log.d("MainActivity", "onStop() called");
-} 
+ 
     @Override
     protected void onDestroy() {
-        RustCall.stop_audio_service();
+        // RustCall.stop_audio_service();
 
 Intent serviceIntent = new Intent(this, RaudServ.class);
         stopService(serviceIntent);
