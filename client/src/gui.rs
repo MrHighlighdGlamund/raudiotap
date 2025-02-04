@@ -1,17 +1,23 @@
 use crate::components::server::Server;
 use crate::utilities::enmus::GuiMessage;
+// use android_activity::AndroidApp;
 use egui::{Context, Image, ScrollArea, TextBuffer, TextureHandle};
 use egui_wgpu::winit::Painter;
-use egui_winit::State;
-use image::{GenericImageView, ImageReader};
-use std::io::Cursor;
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-
-const LOGO_BYTES: &'static [u8] = include_bytes!("../assets/logo.png");
+use egui_winit::{winit, State};
 use winit::event::Event::*;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
+
+use jni::objects::{JClass, JObject, JString, JValue};
+use jni::sys::jboolean;
+use jni::JNIEnv;
+
+use std::cmp::Ordering;
+use std::io::Cursor;
+use std::sync::atomic::AtomicBool;
+use std::sync::{mpsc, Arc, Mutex};
+use std::task::Poll;
+use std::thread;
+use std::time::Duration;
 
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
@@ -33,7 +39,6 @@ fn gui_build(
     sender: &mut crossbeam_channel::Sender<GuiMessage>,
     receiver: &mut crossbeam_channel::Receiver<GuiMessage>,
     gui_params: &mut gui_params,
-    image: &TextureHandle,
 ) {
     egui::CentralPanel::default().show(ctx, |ui| {
         let duration = std::time::Instant::now();
@@ -54,6 +59,7 @@ fn gui_build(
 
         ui.group(|ui| {
             ui.label(format!("RaudioTap by MrHighlightGlamund"));
+            ui.button("Start Audio Service");
             // let img_size = image.size_vec2();
             // let img_height = img_size.y;
             // let img_width = img_size.x;
@@ -78,8 +84,6 @@ fn gui_build(
             //     image,
             //     egui::Vec2::new(scaled_width, scaled_height),
             // );
-
-
         });
 
         ui.group(|ui| {
@@ -99,11 +103,16 @@ fn gui_build(
                 });
         });
 
-        thread::sleep(Duration::from_millis(16) - duration.elapsed());
+        // thread::sleep(Duration::from_millis(16) - duration.elapsed());
     });
 }
 
-pub fn gui_thread(event_loop: EventLoop<Event>, sender: crossbeam_channel::Sender<GuiMessage>, receiver: crossbeam_channel::Receiver<GuiMessage>) {
+pub fn gui_thread(
+    event_loop: EventLoop<Event>,
+    sender: crossbeam_channel::Sender<GuiMessage>,
+    receiver: crossbeam_channel::Receiver<GuiMessage>,
+    stop: Arc<AtomicBool>,
+) {
     // let mut server = Server::new();
     // server.run();
     let mut gui_params = gui_params::new();
@@ -114,7 +123,6 @@ pub fn gui_thread(event_loop: EventLoop<Event>, sender: crossbeam_channel::Sende
         event_loop.create_proxy(),
     )));
 
-    let image = load_image(&ctx);
     ctx.set_request_repaint_callback(move |_| {
         repaint_signal
             .0
@@ -132,66 +140,78 @@ pub fn gui_thread(event_loop: EventLoop<Event>, sender: crossbeam_channel::Sende
         false,
     );
     let mut window: Option<winit::window::Window> = None;
-
-    event_loop.run(move |event, event_loop, control_flow| match event {
-        Resumed => match window {
-            None => {
-                window = Some(create_window(event_loop, &mut state, &mut painter));
-            }
-            Some(ref window) => {
-                pollster::block_on(painter.set_window(Some(window))).unwrap();
-                window.request_redraw();
-            }
-        },
-        Suspended => {
-            window = None;
-        }
-        RedrawRequested(..) => {
-            if let Some(window) = window.as_ref() {
-                let raw_input = state.take_egui_input(window);
-
-                let full_output = ctx.run(raw_input, |ctx| {
-                    gui_build(ctx, &mut sender, &mut receiver, &mut gui_params, &image);
-                });
-                state.handle_platform_output(window, &ctx, full_output.platform_output);
-
-                painter.paint_and_update_textures(
-                    state.pixels_per_point(),
-                    egui::Rgba::default().to_array(),
-                    &ctx.tessellate(full_output.shapes),
-                    &full_output.textures_delta,
-                    false,
-                );
-
-                if full_output.repaint_after.is_zero() {
+    let stop = stop.clone();
+    let thread = std::thread::spawn(move || {});
+    event_loop.run(move |event, event_loop, control_flow| {
+        match event {
+            Resumed => match window {
+                None => {
+                    window = Some(create_window(event_loop, &mut state, &mut painter));
+                }
+                Some(ref window) => {
+                    pollster::block_on(painter.set_window(Some(window))).unwrap();
                     window.request_redraw();
                 }
-            }
-        }
-        MainEventsCleared | UserEvent(Event::RequestRedraw) => {
-            if let Some(window) = window.as_ref() {
-                window.request_redraw();
-            }
-        }
-        WindowEvent { event, .. } => {
-            match event {
-                winit::event::WindowEvent::Resized(size) => {
-                    painter.on_window_resized(size.width, size.height);
-                }
-                winit::event::WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                _ => {}
+            },
+            Suspended => {
+                window = None;
             }
 
-            let response = state.on_event(&ctx, &event);
-            if response.repaint {
+            RedrawRequested(..) => {
+                if let Some(window) = window.as_ref() {
+                    let raw_input = state.take_egui_input(window);
+
+                    let full_output = ctx.run(raw_input, |ctx| {
+                        gui_build(ctx, &mut sender, &mut receiver, &mut gui_params);
+                    });
+                    state.handle_platform_output(window, &ctx, full_output.platform_output);
+
+                    painter.paint_and_update_textures(
+                        state.pixels_per_point(),
+                        egui::Rgba::default().to_array(),
+                        &ctx.tessellate(full_output.shapes),
+                        &full_output.textures_delta,
+                        false,
+                    );
+
+                    if full_output.repaint_after.is_zero() {
+                        window.request_redraw();
+                    }
+                }
+                // app.poll_events(None, |event| {
+                //                 match event {
+                //                     _ => {println!("Event: {:#?}", event);}
+                //                 }
+                //             })
+            }
+            MainEventsCleared | UserEvent(Event::RequestRedraw) => {
                 if let Some(window) = window.as_ref() {
                     window.request_redraw();
                 }
             }
+            WindowEvent { event, .. } => {
+                match event {
+                    winit::event::WindowEvent::Resized(size) => {
+                        painter.on_window_resized(size.width, size.height);
+                    }
+                    winit::event::WindowEvent::Destroyed => {}
+                    winit::event::WindowEvent::CloseRequested => {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    _ => {}
+                }
+
+                let response = state.on_event(&ctx, &event);
+                if response.repaint {
+                    if let Some(window) = window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
+
+            LoopDestroyed => {}
+            _ => (),
         }
-        _ => (),
     });
 }
 pub enum Event {
@@ -233,16 +253,4 @@ fn create_window<T>(
     window.request_redraw();
 
     window
-}
-fn load_image(ctx: &Context) -> TextureHandle {
-    let img = image::load_from_memory(LOGO_BYTES).expect("Failed to load image");
-
-    let rgba = img.to_rgba8();
-
-    let (width, height) = img.dimensions();
-    ctx.load_texture(
-        "my_image",
-        egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba),
-        Default::default(),
-    )
 }

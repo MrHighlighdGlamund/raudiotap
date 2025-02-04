@@ -1,19 +1,25 @@
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, OnceLock};
-
 use components::server::Server;
-use egui_wgpu::winit::Painter;
-use egui_winit::State;
-use jni::objects::{JClass, JObject, JString, JValue};
-use jni::JNIEnv;
-use ndk_context::android_context;
+use egui_wgpu::wgpu;
+use egui_winit::winit;
 use utilities::enmus::GuiMessage;
-use winit::event::Event::*;
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
+use std::sync::{Arc, OnceLock};
+use std::sync::atomic::AtomicBool;
+
+use jni::{objects::JObject, sys::JNIEnv};
+// use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
+pub mod gui;
+
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
-pub mod gui;
+// use winit::event_loop::ControlFlow;
+
+// use egui_wgpu::winit::Painter;
+// use egui_winit::State;
+//use egui_winit_platform::{Platform, PlatformDescriptor};
+use winit::event::Event::*;
+const INITIAL_WIDTH: u32 = 1920;
+const INITIAL_HEIGHT: u32 = 1080;
 pub mod utilities {
     pub mod enmus;
     pub mod helper_functions;
@@ -47,81 +53,54 @@ fn initialize_channels() {
         .is_ok()
     {}
 }
-#[cfg(any(target_os = "ios", target_os = "android"))]
-fn stop_unwind<F: FnOnce() -> T, T>(f: F) -> T {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
-        Ok(t) => t,
-        Err(err) => {
-            eprintln!("attempt to unwind out of `rust` with err: {:?}", err);
-            std::process::abort()
-        }
-    }
-}
 
-#[cfg(target_os = "ios")]
-fn _start_app() {
-    stop_unwind(|| main());
-}
-
-#[no_mangle]
-#[inline(never)]
-#[cfg(target_os = "ios")]
-pub extern "C" fn start_app() {
-    _start_app();
-}
-
-#[cfg(not(target_os = "android"))]
-pub fn main() {
-    initialize_channels();
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Warn)
-        .parse_default_env()
-        .init();
-
-    let event_loop = EventLoopBuilder::with_user_event().build();
-
-    gui::gui_thread(
-        event_loop,
-        CHANNEL_TO_SERVER.get().unwrap().0.clone(),
-        CHANNEL_TO_GUI.get().unwrap().1.clone(),
-    );
-}
 
 #[allow(dead_code)]
 #[cfg(target_os = "android")]
 #[no_mangle]
 fn android_main(app: AndroidApp) {
     initialize_channels();
+    use egui_winit::winit::event_loop::EventLoopBuilder;
     use winit::platform::android::EventLoopBuilderExtAndroid;
 
     android_logger::init_once(
-        android_logger::Config::default().with_max_level(log::LevelFilter::Warn),
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Trace) // Default comes from `log::max_level`, i.e. Off
+            .with_filter(
+                android_logger::FilterBuilder::new()
+                    .filter_level(log::LevelFilter::Debug)
+                    //.filter_module("android_activity", log::LevelFilter::Trace)
+                    //.filter_module("winit", log::LevelFilter::Trace)
+                    .build(),
+            ),
     );
-    let android_context = android_context();
-    let vm = unsafe { jni::JavaVM::from_raw(android_context.vm().cast()) }.unwrap();
-    let mut env = vm.attach_current_thread().unwrap();
-
-    // Get the Activity
-    let context = unsafe { JObject::from_raw(android_context.context().cast()) };
-    start_foreground_service(&mut env, context);
 
     let event_loop = EventLoopBuilder::with_user_event()
         .with_android_app(app)
         .build();
-    stop_unwind(|| {
-        gui::gui_thread(
+    // _main(event_loop);
+    gui::gui_thread(
             event_loop,
             CHANNEL_TO_SERVER.get().unwrap().0.clone(),
             CHANNEL_TO_GUI.get().unwrap().1.clone(),
-        )
-    });
+            STOP_BACKGROUND_SERVICE.get().unwrap().clone(),
+        );
+
 }
 
+#[allow(dead_code)]
+#[cfg(not(target_os = "android"))]
+fn main() {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Warn) // Default Log Level
+        .parse_default_env()
+        .init();
+
+    let event_loop = EventLoopBuilder::with_user_event().build();
+    _main(event_loop);
+}
 #[no_mangle]
-pub extern "C" fn Java_com_example_raud_1service_RustCall_start_1audio_1service(
-    env: JNIEnv,
-    _: JObject,
-) {
+pub extern "C" fn Java_com_glamund_raudiotap_RustCall_start_1audio_1service(env: JNIEnv, _: JObject) {
     initialize_channels();
     let mut server = Server::new(
         CHANNEL_TO_GUI.get().unwrap().0.clone(),
@@ -129,67 +108,15 @@ pub extern "C" fn Java_com_example_raud_1service_RustCall_start_1audio_1service(
         STOP_BACKGROUND_SERVICE.get().unwrap().clone(),
     );
     server.run();
-    // std::thread::spawn(move || loop {
-
-    //     std::thread::sleep(std::time::Duration::from_secs(1));
-    // });
 }
 
 #[no_mangle]
-pub extern "C" fn Java_com_example_raud_1service_RustCall_stop_1audio_1service(
-    env: JNIEnv,
-    _: JObject,
-) {
-    // Implementation of the start_audio_service function
-    for i in 0..100 {
-        println!("Stopping audio service");
-    }
+pub extern "C" fn Java_com_glamund_raudiotap_RustCall_stop_1audio_1service(env: JNIEnv, _: JObject) {
     STOP_BACKGROUND_SERVICE
         .get()
         .unwrap()
         .store(true, std::sync::atomic::Ordering::SeqCst);
-}
+    std::process::exit(0);
 
-#[no_mangle]
-fn start_foreground_service(env: &mut JNIEnv, context: JObject) {
-    let class_loader = env
-        .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
-        .expect("Failed to get ClassLoader")
-        .l()
-        .unwrap();
-
-    let service_class = env
-        .call_method(
-            &class_loader,
-            "loadClass",
-            "(Ljava/lang/String;)Ljava/lang/Class;",
-            &[JValue::Object(
-                &env.new_string("com/example/raud_service/RaudServ").unwrap(),
-            )],
-        )
-        .expect("Failed to load RaudServ class")
-        .l()
-        .unwrap();
-
-    let service_class_obj = JObject::from(service_class);
-
-    let intent = env
-        .new_object("android/content/Intent", "()V", &[])
-        .expect("Failed to create new Intent object");
-
-    env.call_method(
-        &intent,
-        "setClass",
-        "(Landroid/content/Context;Ljava/lang/Class;)Landroid/content/Intent;",
-        &[JValue::Object(&context), JValue::Object(&service_class_obj)],
-    )
-    .expect("Failed to set class for Intent");
-
-    env.call_method(
-        &context,
-        "startService",
-        "(Landroid/content/Intent;)Landroid/content/ComponentName;",
-        &[JValue::Object(&intent)],
-    )
-    .expect("Failed to start service");
+    // Implementation of the start_audio_service function
 }
