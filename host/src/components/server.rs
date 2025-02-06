@@ -1,16 +1,21 @@
+use crate::utilities::enmus::{ClientMessage, GuiMessage};
+use crate::{components::client::Client, utilities::helper_functions::get_local_socket_address};
 use crossbeam_channel::Sender;
 use local_ip_addr::get_local_ip_address;
+use tokio::process::Command;
+use std::thread;
+use regex::Regex;
 use std::{
     io::{Read, Write},
-    net::{SocketAddr, TcpListener, TcpStream},
+    net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicU32},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
 };
-
-use crate::utilities::enmus::GuiMessage;
-use crate::{components::client::Client, utilities::helper_functions::get_local_socket_address};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::{select, task, time};
 
 pub struct Server {
     thread_hanle: Option<std::thread::JoinHandle<()>>,
@@ -20,7 +25,6 @@ pub struct Server {
     pub update_udp_thread: Arc<AtomicBool>,
     pub targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
     pub send_client: crossbeam_channel::Sender<Client>,
-    pub recv_client: crossbeam_channel::Receiver<Client>,
 
     pub sample_rate: Arc<AtomicU32>,
 }
@@ -29,27 +33,26 @@ impl Server {
         send_message: Sender<GuiMessage>,
         update_udp_thread: Arc<AtomicBool>,
         targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
+        sample_rate: Arc<AtomicU32>,
+        send_client: crossbeam_channel::Sender<Client>,
     ) -> Self {
-        let (send_client, recv_client) = crossbeam_channel::bounded(100);
         Self {
             socket_addr: "127.0.0.1:8000".parse().unwrap(),
             send_message,
             update_udp_thread,
             targets_addr_shared,
-            sample_rate: Arc::new(AtomicU32::new(0)),
+            sample_rate,
             thread_hanle: None,
             stop_thread: Arc::new(AtomicBool::new(false)),
             send_client,
-            recv_client,
         }
     }
-    pub fn run(&mut self) {
+    pub async fn run(&mut self) {
         match get_local_socket_address() {
             Some(socket_addr) => {
-                self.send_message
-                    .send(GuiMessage::ServerError(format!(
-                        "Successfully got TCP Socket address: {}",
-                        socket_addr
+                self.send_message.send(GuiMessage::ServerError(format!(
+                    "Successfully got TCP Socket address: {}",
+                    socket_addr
                 )));
                 self.socket_addr = socket_addr;
             }
@@ -62,87 +65,55 @@ impl Server {
                 return;
             }
         }
-        let mut tcp_listener: Option<TcpListener> = TcpListener::bind(self.socket_addr).ok();
-        if tcp_listener.is_none() {
-            self.send_message
-                .send(GuiMessage::ServerError(
-                    "Unable to start TCP Server, maybe one is allready connected".to_string(),
-                ))
-                .unwrap();
-            return;
-        }
-        let tcp_listener = tcp_listener.take().expect("tcp_listener is none");
-        tcp_listener
-            .set_nonblocking(true)
-            .expect("Failed to set nonblocking");
 
-        let stop_thread = self.stop_thread.clone();
+        let mut tcp_listener = match TcpListener::bind(self.socket_addr).await {
+            Ok(tcp_listener) => tcp_listener,
+            Err(e) => {
+                self.send_message
+                    .send(GuiMessage::ServerError(
+                        "Unable to start TCP Server, maybe one is allready connected".to_string(),
+                    ))
+                    .unwrap();
+                self.send_message
+                    .send(GuiMessage::ServerError(
+                        "Unable to start TCP Server, maybe one is allready connected".to_string(),
+                    ))
+                    .unwrap();
+                return;
+            }
+        };
+
         let send_client = self.send_client.clone();
         let sample_rate = self.sample_rate.clone();
         let send_message = self.send_message.clone();
-        self.thread_hanle = Some(std::thread::spawn(move || loop {
-            let upate_cycle = std::time::Duration::from_secs(2);
-            let mut update_time = std::time::Instant::now();
-            for stream in tcp_listener.incoming() {
-                if stop_thread.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
+
+        let update_udp_thread = self.update_udp_thread.clone();
+        let targets_addr_shared = self.targets_addr_shared.clone();
+
+        loop {
+            match tcp_listener.accept().await {
+                Ok((mut stream, _)) => {
+                    let send_client = send_client.clone();
+                    let update_udp_thread = update_udp_thread.clone();
+                    let targets_addr_shared = targets_addr_shared.clone();
+                    let sample_rate = sample_rate.clone();
+                    tokio::spawn(async move {
+                        handle_client(
+                            stream,
+                            send_client,
+                            update_udp_thread,
+                            targets_addr_shared,
+                            sample_rate.clone(),
+                        )
+                        .await;
+                    });
                 }
-                
-                std::thread::sleep(std::time::Duration::from_millis(70));
-
-                match stream {
-                    Ok(mut stream) => {
-                        let mut message = [0; 512];
-                        match stream.read(&mut message) {
-                            Ok(bytes) => match String::from_utf8(message[..bytes].to_vec()) {
-                                Ok(message) => {
-                                    let command = message.split(":").collect::<Vec<&str>>()[0];
-                                    match command {
-                                        "CONNECT" => {
-                                            let data = message.split(":").collect::<Vec<&str>>()[1];
-                                            let mut client_ip = stream.peer_addr().unwrap();
-                                            client_ip.set_port(8000);
-                                            send_message
-                                                .send(GuiMessage::ServerError(
-                                                    "Client connected: ".to_string() + &client_ip.to_string(),
-                                                ))
-                                                .unwrap();
-
-                                            
-                                            let message_SR = format!("SAMPLERATE:{}", sample_rate.load(std::sync::atomic::Ordering::Relaxed));
-                                            stream.write_all(message_SR.as_bytes()).unwrap();
-
-
-
-                                            let client = Client::new(
-                                                data.to_string(),
-                                                client_ip,
-                                                stream.try_clone().unwrap(),
-                                                send_message.clone(),
-                                            );
-                                            send_client.send(client).unwrap();
-                                        }
-                                        _ => {
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    println!("Failed to convert message to utf8");
-                                }
-                            },
-                            Err(_) => {
-                                println!("Failed to read tcp message");
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // println!("Failed to get stream")
-                    }
-                }
+                Err(_e) => {}
             }
-        }));
+        }
     }
 }
+
 impl Clone for Server {
     fn clone(&self) -> Self {
         Self {
@@ -154,7 +125,152 @@ impl Clone for Server {
             thread_hanle: None,
             stop_thread: self.stop_thread.clone(),
             send_client: self.send_client.clone(),
-            recv_client: self.recv_client.clone(),
+        }
+    }
+}
+
+async fn handle_client(
+    mut stream: tokio::net::TcpStream,
+    send_client: crossbeam_channel::Sender<Client>,
+    update_udp_thread: Arc<AtomicBool>,
+    targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
+    sample_rate: Arc<AtomicU32>,
+) {
+    let (send_to_gui, recv_from_client) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
+    let (mut send_to_client, mut recv_from_gui) =
+        tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
+    let mut msg = [0; 512];
+    let mut client_ip = stream.peer_addr().unwrap();
+    client_ip.set_port(8000);
+    let mut recv_from_client: Option<tokio::sync::mpsc::UnboundedReceiver<ClientMessage>> =
+        Some(recv_from_client);
+    let mut interval = time::interval(tokio::time::Duration::from_secs(4)); // Interval for the print task
+
+    loop {
+        select! {
+        Some(msg) = recv_from_gui.recv() => {  // No `.await` here, just check `Some(msg)`
+            match msg {
+                ClientMessage::Start => {
+                    let mut client_ip = stream.peer_addr().unwrap();
+                    client_ip.set_port(8000);
+                    targets_addr_shared.lock().unwrap().retain(|addr| *addr != client_ip);
+                    targets_addr_shared.lock().unwrap().push(client_ip);
+                    update_udp_thread.store(true, Ordering::Relaxed);
+                    let _ = stream.write_all("START".as_bytes()).await;
+                }
+                ClientMessage::Stop => {
+                    let mut client_ip = stream.peer_addr().unwrap();
+                    client_ip.set_port(8000);
+                    targets_addr_shared.lock().unwrap().retain(|addr| *addr != client_ip);
+                    update_udp_thread.store(true, Ordering::Relaxed);
+                    let _ = stream.write_all("STOP".as_bytes()).await;
+                }
+                ClientMessage::Delay(new_sample_delay) => {
+                    let _ = stream.write_all(format!("DELAY:{}", new_sample_delay).as_bytes()).await;
+                }
+                _ => {
+                    println!("Unknown message");
+                }
+            }
+
+        },
+
+            result = stream.read(&mut msg) => {
+                match result {
+                    Ok(0) => {
+                        break;
+                    }
+                    Ok(bytes) => {
+                        if let Ok(message) = String::from_utf8(msg[..bytes].to_vec()) {
+                            let parts: Vec<&str> = message.split(':').collect();
+                                let command = parts[0];
+
+                                match command {
+                                    "CONNECT" => {
+
+                                let data = parts[1].to_string();
+                                        let mut client_ip = stream.peer_addr().unwrap();
+                                        client_ip.set_port(8000);
+                                        let message_SR = format!(
+                                            "SAMPLERATE:{}",
+                                            sample_rate.load(Ordering::Relaxed)
+                                        );
+                                        let _ = stream.write_all(message_SR.as_bytes()).await;
+                                        let new_client = Client::new(
+                                            data,
+                                            client_ip,
+                                            send_to_client.clone(),
+                                            recv_from_client.take().unwrap(),
+                                        );
+                                        let _ = send_client.send(new_client);
+                                    }
+                                    "CLIENTSTART" => { 
+
+                                        send_to_gui.send(ClientMessage::Start).unwrap();
+
+
+                                    }
+                                    "CLIENTSTOP" => { 
+                                        send_to_gui.send(ClientMessage::Stop).unwrap();
+                                    }
+
+                                    _ => {
+                                    }
+                                }
+                        }
+                    }
+                    Err(e) => {
+                        println!("Error: {}", e);
+                    }
+                }
+            },
+             _ = interval.tick() => {
+
+                 let ping = ping_ip(&client_ip.to_string()).await;
+                 if let Some(ping) = ping {
+                     send_to_gui.send(ClientMessage::Ping(ping)).unwrap();
+                 }
+                 else {
+                     break
+                 }
+             }
+        }
+    }
+
+    let _ = send_to_gui.send(ClientMessage::Disconnect);
+}
+async fn ping_ip(ip: &str) -> Option<f32> {
+    // Run the ping command
+    //
+    let ip = ip.split(":").collect::<Vec<&str>>()[0];
+    let output = if cfg!(target_os = "windows") {
+        Command::new("ping").args(["-n", "1", ip]).output().await
+    } else {
+        Command::new("ping").args(["-c", "1", ip]).output().await
+    };
+
+    match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            // Regex to extract ping time (works for Windows & Linux/macOS)
+            let re = if cfg!(target_os = "windows") {
+                Regex::new(r"Minimum = (\d+)ms").unwrap() // Windows format
+            } else {
+                Regex::new(r"time=([\d.]+) ms").unwrap() // Linux/macOS format
+            };
+
+            if let Some(caps) = re.captures(&stdout) {
+                if let Some(time) = caps.get(1) {
+                    let ping_time: f32 = time.as_str().parse().unwrap_or(0.0);
+                    return Some(ping_time);
+                }
+            }
+
+            None
+        }
+        Err(e) => {
+            None
         }
     }
 }

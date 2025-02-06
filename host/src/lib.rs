@@ -1,5 +1,5 @@
 use nih_plug::{log::warn, prelude::*};
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU32, Arc};
 pub mod gui;
 pub mod utilities {
     pub mod enmus;
@@ -20,8 +20,10 @@ pub struct Raudiotap {
     send_message: crossbeam_channel::Sender<utilities::enmus::GuiMessage>,
     recv_message: Option<crossbeam_channel::Receiver<utilities::enmus::GuiMessage>>,
     audio_queue: rtrb::Producer<u8>,
+    sample_rate: Arc<AtomicU32>,
     udp_sender: components::udp_sender::UdpSender,
-    server: components::server::Server,
+    recv_client: crossbeam_channel::Receiver<components::client::Client>,
+    // server: components::server::Server,
 }
 
 impl Default for Raudiotap {
@@ -32,12 +34,22 @@ impl Default for Raudiotap {
         let audio_queue_c = Some(audio_queue_c);
         let mut udp_sender =
             components::udp_sender::UdpSender::new(send_message.clone(), audio_queue_c);
+        let sample_rate: Arc<AtomicU32> = Arc::new(AtomicU32::new(0));
+        let (send_client, recv_client) = crossbeam_channel::unbounded::<components::client::Client>();
         let mut server = components::server::Server::new(
             send_message.clone(),
             udp_sender.targets_update.clone(),
             udp_sender.targets_addr_shared.clone(),
+            sample_rate.clone(),
+            send_client,
         );
-        server.run();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                server.run().await;
+            });
+        });
+        // server.run();
         udp_sender.run();
         Self {
             params: Arc::new(RaudiotapParams::default()),
@@ -45,7 +57,9 @@ impl Default for Raudiotap {
             recv_message,
             audio_queue: audio_queue_p,
             udp_sender,
-            server,
+            sample_rate,
+            recv_client,
+            // server,
         }
     }
 }
@@ -103,7 +117,7 @@ impl Plugin for Raudiotap {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let recv_message = self.recv_message.take();
 
-        gui::gui(self, _async_executor, recv_message)
+        gui::gui(self, _async_executor, recv_message, self.recv_client.clone(), self.sample_rate.clone())
     }
 
     fn initialize(
@@ -114,9 +128,10 @@ impl Plugin for Raudiotap {
     ) -> bool {
         println!("sample rate");
         let sample_rate = buffer_config.sample_rate as u32;
-        self.server
-            .sample_rate
-            .store(sample_rate, std::sync::atomic::Ordering::SeqCst);
+        self.sample_rate.store(sample_rate, std::sync::atomic::Ordering::SeqCst);
+        // self.server
+        //     .sample_rate
+        //     .store(sample_rate, std::sync::atomic::Ordering::SeqCst);
         true
     }
 }
