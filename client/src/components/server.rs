@@ -64,7 +64,7 @@ impl Server {
                     .set_read_timeout(Some(std::time::Duration::from_millis(100)))
                     .unwrap();
 
-                let mut buffer = [0; 512];
+                let mut msg = [0; 512];
                 loop {
                     if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
@@ -83,7 +83,7 @@ impl Server {
                         }
                     };
 
-                    match tcp_stream.read(&mut buffer) {
+                    match tcp_stream.read(&mut msg) {
                         Ok(0) => {
                             send_message
                                 .send(ServerMessage::Log(
@@ -93,125 +93,154 @@ impl Server {
                             send_message.send(ServerMessage::Disconnected).unwrap();
                             break;
                         }
-                        Ok(n) => {
-                            let msg = String::from_utf8_lossy(&buffer[..n]);
-                            match msg {
-                                msg if msg.contains("START") => {
-                                    send_message
-                                        .send(ServerMessage::Log(
-                                            "Received START message from server".to_string(),
-                                        ))
-                                        .unwrap();
-                                    audio.stop();
-                                    udp_reciver.stop();
-
-                                    let (producer, consumer) =
-                                        rtrb::RingBuffer::<i16>::new(96000 * 64);
-                                    audio.run(consumer);
-                                    // std::thread::sleep(std::time::Duration::from_millis(300));
-                                    udp_reciver.run(producer);
-                                }
-                                msg if msg.contains("STOP") => {
-                                    send_message
-                                        .send(ServerMessage::Log(
-                                            "Received STOP message from server".to_string(),
-                                        ))
-                                        .unwrap();
-                                    audio.stop();
-
-                                    udp_reciver.stop();
-                                }
-                                message if message.contains("SAMPLERATE") => {
-                                    let new_sample_rate: u32 = match message
-                                        .split(":")
-                                        .collect::<Vec<&str>>()[1]
-                                        .trim()
-                                        .parse()
-                                    {
-                                        Ok(sample_rate) => sample_rate,
-                                        Err(e) => {
-                                            send_message
+                        Ok(bytes) => {
+                            if let Ok(message) = String::from_utf8(msg[..bytes].to_vec()) {
+                                let message_parts: Vec<&str> = message.split(':').collect();
+                                let command = message_parts[0];
+                                match command {
+                                    "START" => {
+                                        udp_reciver.udp_chunk_size.store(
+                                            message_parts[1].trim().parse().unwrap(),
+                                            std::sync::atomic::Ordering::Release,
+                                        );
+                                        send_message
+                                            .send(ServerMessage::Log(
+                                                "Received START message from server".to_string(),
+                                            ))
+                                            .unwrap();
+                                        audio.stop();
+                                        udp_reciver.stop();
+                                        let (producer, consumer) =
+                                            rtrb::RingBuffer::<i16>::new(96000 * 64);
+                                        audio.run(consumer);
+                                        // std::thread::sleep(std::time::Duration::from_millis(300));
+                                        udp_reciver.run(producer);
+                                    }
+                                    "STOP" => {
+                                        send_message
+                                            .send(ServerMessage::Log(
+                                                "Received STOP message from server".to_string(),
+                                            ))
+                                            .unwrap();
+                                        audio.stop();
+                                        udp_reciver.stop();
+                                    }
+                                    "SAMPLERATE" => {
+                                        let new_sample_rate: u32 = match message_parts[1]
+                                            .trim()
+                                            .parse()
+                                        {
+                                            Ok(sample_rate) => sample_rate,
+                                            Err(e) => {
+                                                send_message
                                                 .send(ServerMessage::Log(
                                                     "Received invalid SAMPLERATE message from server. Error: ".to_string() + &e.to_string(),
                                             ))
                                             .unwrap();
-                                            continue;
-                                        }
-                                    };
-                                    audio.sample_rate.store(
-                                        new_sample_rate,
-                                        std::sync::atomic::Ordering::Relaxed,
-                                    );
-                                    send_message
+                                                continue;
+                                            }
+                                        };
+                                        audio.sample_rate.store(
+                                            new_sample_rate,
+                                            std::sync::atomic::Ordering::Relaxed,
+                                        );
+                                        send_message
                                     .send(ServerMessage::Log(
                                         "Received SAMPLERATE message from server. New sample rate: "
                                             .to_string()
                                             + &new_sample_rate.to_string(),
                                     ))
                                     .unwrap();
-                                }
-                                message if message.contains("DELAY") => {
-                                    let new_sample_delay =
-                                        message.split(":").collect::<Vec<&str>>()[1]
-                                            .trim()
-                                            .parse()
-                                            .unwrap();
-                                    let current_sample_delay = audio
-                                        .current_delay
-                                        .load(std::sync::atomic::Ordering::Relaxed);
-                                    if current_sample_delay != new_sample_delay {
-                                        if new_sample_delay > current_sample_delay {
-                                            let add_samples =
-                                                (new_sample_delay - current_sample_delay);
-                                            udp_reciver.add_delay_count.store(
-                                                add_samples,
-                                                std::sync::atomic::Ordering::Relaxed,
-                                            );
-                                            udp_reciver
-                                                .update_delay
-                                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                                        } else {
-                                            let delete_samples =
-                                                (current_sample_delay - new_sample_delay);
-                                            audio.delete_delay_count.store(
-                                                delete_samples,
-                                                std::sync::atomic::Ordering::Relaxed,
-                                            );
-                                            audio
-                                                .update_delay
-                                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                                        }
-                                        audio.current_delay.store(
-                                            new_sample_delay,
-                                            std::sync::atomic::Ordering::Relaxed,
-                                        );
                                     }
-                                    send_message
-                                        .send(ServerMessage::Log(
-                                            "Received DELAY message from server. New delay: "
-                                                .to_string()
-                                                + &new_sample_delay.to_string(),
-                                        ))
-                                        .unwrap();
-                                }
-                                _ => {
-                                    send_message
-                                        .send(ServerMessage::Log(
-                                            "Received unknown message from server".to_string()
-                                                + msg.as_ref(),
-                                        ))
-                                        .unwrap();
+                                    "UDP_CHUNK_SIZE" => {
+                                        send_message
+                                    .send(ServerMessage::Log(
+                                        "Received UDP_CHUNK_SIZE message from server. New UDP chunk size: "
+                                            .to_string()
+                                            + &message_parts[1].trim(),
+                                    ))
+
+                                    .unwrap();
+                                        let new_ = message_parts[1].trim().parse().unwrap();
+                                        udp_reciver
+                                            .udp_chunk_size
+                                            .store(new_, std::sync::atomic::Ordering::Release);
+                                        udp_reciver
+                                            .update
+                                            .store(true, std::sync::atomic::Ordering::Release);
+                                        tcp_stream.write_all("CLIENTSTART".as_bytes()).unwrap();
+                                    }
+
+                                    "DELAY" => {
+                                        let new_sample_delay =
+                                            message_parts[1].trim().parse().unwrap();
+                                        let current_sample_delay = audio
+                                            .current_delay
+                                            .load(std::sync::atomic::Ordering::Acquire);
+                                        if current_sample_delay != new_sample_delay {
+                                            if new_sample_delay > current_sample_delay {
+                                                let add_samples =
+                                                    (new_sample_delay - current_sample_delay);
+                                                udp_reciver.add_delay_count.store(
+                                                    add_samples,
+                                                    std::sync::atomic::Ordering::Release,
+                                                );
+                                                udp_reciver.update_delay.store(
+                                                    true,
+                                                    std::sync::atomic::Ordering::Release,
+                                                );
+                                                udp_reciver.update.store(
+                                                    true,
+                                                    std::sync::atomic::Ordering::Release,
+                                                );
+                                            } else {
+                                                let delete_samples =
+                                                    (current_sample_delay - new_sample_delay);
+                                                audio.delete_delay_count.store(
+                                                    delete_samples,
+                                                    std::sync::atomic::Ordering::Release,
+                                                );
+                                                audio.update_delay.store(
+                                                    true,
+                                                    std::sync::atomic::Ordering::Release,
+                                                );
+                                                udp_reciver.update.store(
+                                                    true,
+                                                    std::sync::atomic::Ordering::Release,
+                                                );
+                                            }
+                                            audio.current_delay.store(
+                                                new_sample_delay,
+                                                std::sync::atomic::Ordering::Relaxed,
+                                            );
+                                        }
+                                        send_message
+                                            .send(ServerMessage::Log(
+                                                "Received DELAY message from server. New delay: "
+                                                    .to_string()
+                                                    + &new_sample_delay.to_string(),
+                                            ))
+                                            .unwrap();
+                                    }
+
+                                    _ => {
+                                        send_message
+                                            .send(ServerMessage::Log(
+                                                "Received unknown message from server".to_string()
+                                                    + message.as_ref(),
+                                            ))
+                                            .unwrap();
+                                    }
                                 }
                             }
                         }
-                        Err(e) => {
-                            // break;
-                        }
+                        Err(e) => {}
                     }
                 }
             }
         }));
     }
+
     pub fn stop(&mut self) {}
 
     pub fn new(

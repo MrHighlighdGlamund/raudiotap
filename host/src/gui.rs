@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     io::Write,
     sync::{
-        atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -33,6 +33,7 @@ pub fn gui(
     mut recv_message: Option<crossbeam_channel::Receiver<GuiMessage>>,
     recv_clients: crossbeam_channel::Receiver<Client>,
     sample_rate: Arc<AtomicU32>,
+
 ) -> Option<Box<dyn Editor>> {
     let params = plugin.params.clone();
     let egui_state = params.editor_state.clone();
@@ -43,6 +44,8 @@ pub fn gui(
     let clients: Arc<Mutex<Vec<Client>>> = Arc::new(Mutex::new(Vec::new()));
     // let recv_clients = server.recv_client.clone();
     let refresh_counter = Arc::new(AtomicI32::new(0));
+
+    let udp_chunk_size = Arc::new(AtomicU64::new(128));
     create_egui_editor(
         plugin.params.editor_state.clone(),
         (),
@@ -94,27 +97,55 @@ pub fn gui(
                         clients.retain_mut(|client| client.udp_addr != new_client.udp_addr);
                         clients.push(new_client);
                     }
-                    // if update_targets.load(Ordering::Relaxed) {
-                    //     server.targets_addr_shared.lock().unwrap().clear();
-                    //     clients.retain_mut(|client| {
-                    //         if client.is_running {
-                    //             client.start();
-                    //             // if !sucess {
-                    //             //     return false;
-                    //             // }
-                    //             server
-                    //                 .targets_addr_shared
-                    //                 .lock()
-                    //                 .unwrap()
-                    //                 .push(client.udp_addr);
-                    //         } else {
-                    //             client.stop();
-                    //         }
-                    //         true
-                    //     });
-                    //     update_targets.store(false, Ordering::Relaxed);
-                    //     server.update_udp_thread.store(true, Ordering::Relaxed);
-                    // }
+                    ui.group(|ui| {
+                        let size = ui.available_size();
+                        let button_size = Vec2::new(size.x / 4.0 - ui.spacing().item_spacing.x, size.y / 8.0);
+                        let drag_value_size = Vec2::new(
+                            size.x - 2.0 * (size.x / 4.0) - ui.spacing().item_spacing.x,
+                            size.y / 8.0 - ui.spacing().item_spacing.y,
+                        );
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                button_size,
+                                egui::Button::new("<<<"),
+                            ).clicked().then(|| {
+                                if udp_chunk_size.load(Ordering::Acquire) <= 2 {
+                                    return;
+                                }
+                                let new_chunk_size = udp_chunk_size.load(Ordering::Acquire) / 2;
+                                udp_chunk_size.store(new_chunk_size, Ordering::Release);
+                                for client in clients.iter_mut() {
+                                    client.sender.send(ClientMessage::UdpChunkSize(new_chunk_size)).unwrap();
+                                }
+                            });
+                            ui.add_sized(
+                                drag_value_size,
+                                egui::Label::new(format!(
+                                    "UDP Chunk Size: {}",
+                                    udp_chunk_size.load(Ordering::Relaxed)
+                                )),
+                                
+                            );
+                            ui.add_sized(
+                                button_size,
+                                egui::Button::new(">>>"),
+                            ).clicked().then(|| {
+                                if udp_chunk_size.load(Ordering::Acquire) >= 32768 /2 {
+                                    return;
+                                }
+                                let new_chunk_size = udp_chunk_size.load(Ordering::Acquire) * 2;
+                                udp_chunk_size.store(new_chunk_size, Ordering::Release);
+                                for client in clients.iter_mut() {
+                                    client.sender.send(ClientMessage::UdpChunkSize(new_chunk_size)).unwrap();
+                                }
+                            });
+
+                        });
+
+
+                        
+                    });
+
 
                     ui.group(|ui| {
                         let mut start_client = false;

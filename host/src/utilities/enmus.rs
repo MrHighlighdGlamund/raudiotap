@@ -14,6 +14,8 @@ pub enum ClientMessage {
     Disconnect,
     Delay(u32),
     Ping(f32),
+    UdpChunkSize(u64),
+
     }
 
 

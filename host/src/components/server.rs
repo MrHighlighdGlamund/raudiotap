@@ -2,9 +2,9 @@ use crate::utilities::enmus::{ClientMessage, GuiMessage};
 use crate::{components::client::Client, utilities::helper_functions::get_local_socket_address};
 use crossbeam_channel::Sender;
 use local_ip_addr::get_local_ip_address;
-use tokio::process::Command;
-use std::thread;
 use regex::Regex;
+use std::sync::atomic::{AtomicU16, AtomicU64};
+use std::thread;
 use std::{
     io::{Read, Write},
     net::SocketAddr,
@@ -15,6 +15,7 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::process::Command;
 use tokio::{select, task, time};
 
 pub struct Server {
@@ -25,8 +26,8 @@ pub struct Server {
     pub update_udp_thread: Arc<AtomicBool>,
     pub targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
     pub send_client: crossbeam_channel::Sender<Client>,
-
     pub sample_rate: Arc<AtomicU32>,
+    pub udp_chunk_size: Arc<AtomicU64>,
 }
 impl Server {
     pub fn new(
@@ -35,6 +36,7 @@ impl Server {
         targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
         sample_rate: Arc<AtomicU32>,
         send_client: crossbeam_channel::Sender<Client>,
+        udp_chunk_size: Arc<AtomicU64>,
     ) -> Self {
         Self {
             socket_addr: "127.0.0.1:8000".parse().unwrap(),
@@ -45,6 +47,7 @@ impl Server {
             thread_hanle: None,
             stop_thread: Arc::new(AtomicBool::new(false)),
             send_client,
+            udp_chunk_size,
         }
     }
     pub async fn run(&mut self) {
@@ -86,6 +89,7 @@ impl Server {
         let send_client = self.send_client.clone();
         let sample_rate = self.sample_rate.clone();
         let send_message = self.send_message.clone();
+        let udp_chunk_size = self.udp_chunk_size.clone();
 
         let update_udp_thread = self.update_udp_thread.clone();
         let targets_addr_shared = self.targets_addr_shared.clone();
@@ -97,6 +101,11 @@ impl Server {
                     let update_udp_thread = update_udp_thread.clone();
                     let targets_addr_shared = targets_addr_shared.clone();
                     let sample_rate = sample_rate.clone();
+
+                    let udp_chunk_size = udp_chunk_size.clone();
+                    let chunk_msg =
+                        format!("UDP_CHUNK_SIZE:{}", udp_chunk_size.load(Ordering::Acquire));
+                    
                     tokio::spawn(async move {
                         handle_client(
                             stream,
@@ -104,6 +113,7 @@ impl Server {
                             update_udp_thread,
                             targets_addr_shared,
                             sample_rate.clone(),
+                            udp_chunk_size.clone(),
                         )
                         .await;
                     });
@@ -125,6 +135,7 @@ impl Clone for Server {
             thread_hanle: None,
             stop_thread: self.stop_thread.clone(),
             send_client: self.send_client.clone(),
+            udp_chunk_size: self.udp_chunk_size.clone(),
         }
     }
 }
@@ -135,6 +146,7 @@ async fn handle_client(
     update_udp_thread: Arc<AtomicBool>,
     targets_addr_shared: Arc<Mutex<Vec<SocketAddr>>>,
     sample_rate: Arc<AtomicU32>,
+    udp_chunk_size: Arc<AtomicU64>,
 ) {
     let (send_to_gui, recv_from_client) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
     let (mut send_to_client, mut recv_from_gui) =
@@ -144,25 +156,35 @@ async fn handle_client(
     client_ip.set_port(8000);
     let mut recv_from_client: Option<tokio::sync::mpsc::UnboundedReceiver<ClientMessage>> =
         Some(recv_from_client);
-    let mut interval = time::interval(tokio::time::Duration::from_secs(4)); // Interval for the print task
+    let mut interval = time::interval(tokio::time::Duration::from_secs(1)); // Interval for the print task
+    let mut ping_fail_count = 0;
 
     loop {
         select! {
         Some(msg) = recv_from_gui.recv() => {  // No `.await` here, just check `Some(msg)`
             match msg {
+                ClientMessage::UdpChunkSize(chunk_size) => {
+                    udp_chunk_size.store(chunk_size, Ordering::Release);
+                    let msg = format!("UDP_CHUNK_SIZE:{}", chunk_size);
+                    let _ = stream.write_all(msg.as_bytes()).await;
+                    update_udp_thread.store(true, Ordering::Release);
+                }
                 ClientMessage::Start => {
+
                     let mut client_ip = stream.peer_addr().unwrap();
                     client_ip.set_port(8000);
                     targets_addr_shared.lock().unwrap().retain(|addr| *addr != client_ip);
                     targets_addr_shared.lock().unwrap().push(client_ip);
-                    update_udp_thread.store(true, Ordering::Relaxed);
-                    let _ = stream.write_all("START".as_bytes()).await;
+                    update_udp_thread.store(true, Ordering::Release);
+                    let msg = format!("START:{}", udp_chunk_size.load(Ordering::Acquire));
+
+                    let _ = stream.write_all(msg.as_bytes()).await;
                 }
                 ClientMessage::Stop => {
                     let mut client_ip = stream.peer_addr().unwrap();
                     client_ip.set_port(8000);
                     targets_addr_shared.lock().unwrap().retain(|addr| *addr != client_ip);
-                    update_udp_thread.store(true, Ordering::Relaxed);
+                    update_udp_thread.store(true, Ordering::Release);
                     let _ = stream.write_all("STOP".as_bytes()).await;
                 }
                 ClientMessage::Delay(new_sample_delay) => {
@@ -182,13 +204,13 @@ async fn handle_client(
                     }
                     Ok(bytes) => {
                         if let Ok(message) = String::from_utf8(msg[..bytes].to_vec()) {
-                            let parts: Vec<&str> = message.split(':').collect();
-                                let command = parts[0];
+                            let message_parts: Vec<&str> = message.split(':').collect();
+                                let command = message_parts[0];
 
                                 match command {
                                     "CONNECT" => {
 
-                                let data = parts[1].to_string();
+                                        let data = message_parts[1].to_string();
                                         let mut client_ip = stream.peer_addr().unwrap();
                                         client_ip.set_port(8000);
                                         let message_SR = format!(
@@ -204,13 +226,13 @@ async fn handle_client(
                                         );
                                         let _ = send_client.send(new_client);
                                     }
-                                    "CLIENTSTART" => { 
+                                    "CLIENTSTART" => {
 
                                         send_to_gui.send(ClientMessage::Start).unwrap();
 
 
                                     }
-                                    "CLIENTSTOP" => { 
+                                    "CLIENTSTOP" => {
                                         send_to_gui.send(ClientMessage::Stop).unwrap();
                                     }
 
@@ -230,8 +252,11 @@ async fn handle_client(
                  if let Some(ping) = ping {
                      send_to_gui.send(ClientMessage::Ping(ping)).unwrap();
                  }
+                 else if ping_fail_count < 3 {
+                     ping_fail_count += 1;
+                 }
                  else {
-                     break
+                     break;
                  }
              }
         }
@@ -269,8 +294,6 @@ async fn ping_ip(ip: &str) -> Option<f32> {
 
             None
         }
-        Err(e) => {
-            None
-        }
+        Err(e) => None,
     }
 }
