@@ -3,7 +3,7 @@ use egui_wgpu::wgpu;
 use egui_winit::winit;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
-use utilities::enmus::GuiMessage;
+use utilities::enmus::*;
 
 use jni::{objects::JObject, sys::JNIEnv};
 // use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
@@ -33,8 +33,8 @@ pub mod components {
 static STOP_BACKGROUND_SERVICE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 static CHANNEL_TO_GUI: OnceLock<(
-    crossbeam_channel::Sender<GuiMessage>,
-    crossbeam_channel::Receiver<GuiMessage>,
+    crossbeam_channel::Sender<ServerMessage>,
+    crossbeam_channel::Receiver<ServerMessage>,
 )> = OnceLock::new();
 static CHANNEL_TO_SERVER: OnceLock<(
     crossbeam_channel::Sender<GuiMessage>,

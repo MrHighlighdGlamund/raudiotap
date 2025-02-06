@@ -3,12 +3,12 @@ use std::{convert::TryInto, net::UdpSocket, sync::{
     Arc,
 }};
 
-use crate::utilities::{enmus::GuiMessage, helper_functions::get_udp_socket_address};
+use crate::utilities::{enmus::ServerMessage, helper_functions::get_udp_socket_address};
 pub struct UdpReciver {
     thread_handle: Option<std::thread::JoinHandle<()>>,
     stop_bool: Arc<AtomicBool>,
     socket_addr: std::net::SocketAddr,
-    send_message: crossbeam_channel::Sender<GuiMessage>,
+    send_message: crossbeam_channel::Sender<ServerMessage>,
     pub add_delay_count: Arc<AtomicU32>,
     pub update_delay: Arc<AtomicBool>,
 }
@@ -72,7 +72,7 @@ impl UdpReciver {
                 Err(e) => {
                     if let Some(err) = e.downcast_ref::<std::io::Error>() {
                         self.send_message
-                            .send(GuiMessage::Log(
+                            .send(ServerMessage::Log(
                                 "UDP_T_JOIN_ERROR".to_string() + &err.to_string(),
                             ))
                             .unwrap();
@@ -81,14 +81,14 @@ impl UdpReciver {
             }
         }
         self.send_message
-            .send(GuiMessage::Log(
+            .send(ServerMessage::Log(
                 "UDP Thread Stopped Successfully".to_string(),
             ))
             .unwrap();
         self.stop_bool
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
-    pub fn new(send_message: crossbeam_channel::Sender<GuiMessage>) -> Self {
+    pub fn new(send_message: crossbeam_channel::Sender<ServerMessage>) -> Self {
         let mut socket_addr: std::net::SocketAddr = "127.0.0.1:8000".parse().unwrap();
 
         match get_udp_socket_address() {
@@ -97,7 +97,7 @@ impl UdpReciver {
             }
             None => {
                 send_message
-                    .send(GuiMessage::ServerError(
+                    .send(ServerMessage::Log(
                         "Unable to get UDP Socket address".to_string(),
                     ))
                     .unwrap();

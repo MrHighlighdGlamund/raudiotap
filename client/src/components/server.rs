@@ -7,14 +7,14 @@ use local_ip_addr::get_local_ip_address;
 
 use super::{audio::Audio, udp_reciver::UdpReciver};
 
-use crate::utilities::enmus::GuiMessage;
+use crate::utilities::enmus::*;
 use crate::utilities::helper_functions::get_local_socket_address;
 pub struct Server {
     ip_address: String,
     pub ip_socket_local: std::net::SocketAddr,
     test_ips: Arc<Vec<std::net::SocketAddr>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
-    send_message: crossbeam_channel::Sender<GuiMessage>,
+    send_message: crossbeam_channel::Sender<ServerMessage>,
     pub recv_message: crossbeam_channel::Receiver<GuiMessage>,
     stop_bool: Arc<AtomicBool>,
 }
@@ -24,164 +24,189 @@ impl Server {
         let test_ips = self.test_ips.clone();
         let mut tcp_stream: Option<std::net::TcpStream> = None;
         let send_message = self.send_message.clone();
+        let recv_message = self.recv_message.clone();
         let stop_bool = self.stop_bool.clone();
 
         self.thread_handle = Some(std::thread::spawn(move || {
             let mut audio = Audio::new(send_message.clone());
             let mut udp_reciver = UdpReciver::new(send_message.clone());
             // find host
-            while tcp_stream.is_none() {
-                for ip in test_ips.iter() {
-                    if std::net::TcpStream::connect_timeout(
-                        ip,
-                        std::time::Duration::from_millis(40),
-                    )
-                    .is_ok()
-                    {
-                        tcp_stream = Some(std::net::TcpStream::connect(ip).unwrap());
-                        send_message
-                            .send(GuiMessage::Log(
-                                "Connected to ".to_string() + &ip.to_string(),
-                            ))
-                            .unwrap();
-                        let command = "CONNECT:AndrePhone".to_string();
-                        tcp_stream
-                            .as_mut()
-                            .unwrap()
-                            .write_all(command.as_bytes())
-                            .unwrap();
-                        break;
-                    }
-                }
-            }
-            // Connected to Host
-
-            let mut tcp_stream = tcp_stream.take().expect("tcp_stream is none");
-            tcp_stream
-                .set_read_timeout(Some(std::time::Duration::from_millis(100)))
-                .unwrap();
-
-            let mut buffer = [0; 512];
             loop {
-                if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
+                while tcp_stream.is_none() {
+                    for ip in test_ips.iter() {
+                        if std::net::TcpStream::connect_timeout(
+                            ip,
+                            std::time::Duration::from_millis(40),
+                        )
+                        .is_ok()
+                        {
+                            tcp_stream = Some(std::net::TcpStream::connect(ip).unwrap());
+                            send_message
+                                .send(ServerMessage::Log(
+                                    "Connected to ".to_string() + &ip.to_string(),
+                                ))
+                                .unwrap();
+                            send_message.send(ServerMessage::Connected).unwrap();
+                            let command = "CONNECT:AndrePhone".to_string();
+                            tcp_stream
+                                .as_mut()
+                                .unwrap()
+                                .write_all(command.as_bytes())
+                                .unwrap();
+                            break;
+                        }
+                    }
                 }
-                match tcp_stream.read(&mut buffer) {
-                    Ok(0) => {
-                        send_message
-                            .send(GuiMessage::Log("Connection closed by server".to_string()))
-                            .unwrap();
+                // Connected to Host
+
+                let mut tcp_stream = tcp_stream.take().expect("tcp_stream is none");
+                tcp_stream
+                    .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+                    .unwrap();
+
+                let mut buffer = [0; 512];
+                loop {
+                    if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
                     }
-                    Ok(n) => {
-                        let msg = String::from_utf8_lossy(&buffer[..n]);
+
+                    if let Ok(msg) = recv_message.try_recv() {
                         match msg {
-                            msg if msg.contains("START") => {
-                                send_message
-                                    .send(GuiMessage::Log(
-                                        "Received START message from server".to_string(),
-                                    ))
-                                    .unwrap();
-                                audio.stop();
-                                udp_reciver.stop();
-
-                                let (producer, consumer) = rtrb::RingBuffer::<i16>::new(96000 * 64);
-                                audio.run(consumer);
-                                // std::thread::sleep(std::time::Duration::from_millis(300));
-                                udp_reciver.run(producer);
+                            GuiMessage::Start => {
+                                let command = "CLIENTSTART".to_string();
+                                tcp_stream.write_all(command.as_bytes()).unwrap();
                             }
-                            msg if msg.contains("STOP") => {
-                                send_message
-                                    .send(GuiMessage::Log(
-                                        "Received STOP message from server".to_string(),
-                                    ))
-                                    .unwrap();
-                                audio.stop();
-
-                                udp_reciver.stop();
+                            GuiMessage::Stop => {
+                                let command = "CLIENTSTOP".to_string();
+                                tcp_stream.write_all(command.as_bytes()).unwrap();
                             }
-                            message if message.contains("SAMPLERATE") => {
-                                let new_sample_rate: u32 = match message
-                                    .split(":")
-                                    .collect::<Vec<&str>>()[1]
-                                    .trim()
-                                    .parse()
-                                {
-                                    Ok(sample_rate) => sample_rate,
-                                    Err(e) => {
-                                        send_message
-                                                .send(GuiMessage::Log(
+                        }
+                    };
+
+                    match tcp_stream.read(&mut buffer) {
+                        Ok(0) => {
+                            send_message
+                                .send(ServerMessage::Log(
+                                    "Connection closed by server".to_string(),
+                                ))
+                                .unwrap();
+                            send_message.send(ServerMessage::Disconnected).unwrap();
+                            break;
+                        }
+                        Ok(n) => {
+                            let msg = String::from_utf8_lossy(&buffer[..n]);
+                            match msg {
+                                msg if msg.contains("START") => {
+                                    send_message
+                                        .send(ServerMessage::Log(
+                                            "Received START message from server".to_string(),
+                                        ))
+                                        .unwrap();
+                                    audio.stop();
+                                    udp_reciver.stop();
+
+                                    let (producer, consumer) =
+                                        rtrb::RingBuffer::<i16>::new(96000 * 64);
+                                    audio.run(consumer);
+                                    // std::thread::sleep(std::time::Duration::from_millis(300));
+                                    udp_reciver.run(producer);
+                                }
+                                msg if msg.contains("STOP") => {
+                                    send_message
+                                        .send(ServerMessage::Log(
+                                            "Received STOP message from server".to_string(),
+                                        ))
+                                        .unwrap();
+                                    audio.stop();
+
+                                    udp_reciver.stop();
+                                }
+                                message if message.contains("SAMPLERATE") => {
+                                    let new_sample_rate: u32 = match message
+                                        .split(":")
+                                        .collect::<Vec<&str>>()[1]
+                                        .trim()
+                                        .parse()
+                                    {
+                                        Ok(sample_rate) => sample_rate,
+                                        Err(e) => {
+                                            send_message
+                                                .send(ServerMessage::Log(
                                                     "Received invalid SAMPLERATE message from server. Error: ".to_string() + &e.to_string(),
                                             ))
                                             .unwrap();
-                                        continue;
-                                    }
-                                };
-                                audio
-                                    .sample_rate
-                                    .store(new_sample_rate, std::sync::atomic::Ordering::Relaxed);
-                                send_message
-                                    .send(GuiMessage::Log(
+                                            continue;
+                                        }
+                                    };
+                                    audio.sample_rate.store(
+                                        new_sample_rate,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                    );
+                                    send_message
+                                    .send(ServerMessage::Log(
                                         "Received SAMPLERATE message from server. New sample rate: "
                                             .to_string()
                                             + &new_sample_rate.to_string(),
                                     ))
                                     .unwrap();
-                            }
-                            message if message.contains("DELAY") => {
-                                let new_sample_delay = message.split(":").collect::<Vec<&str>>()[1]
-                                    .trim()
-                                    .parse()
-                                    .unwrap();
-                                let current_sample_delay = audio
-                                    .current_delay
-                                    .load(std::sync::atomic::Ordering::Relaxed);
-                                if current_sample_delay != new_sample_delay {
-                                    if new_sample_delay > current_sample_delay {
-                                        let add_samples = (new_sample_delay - current_sample_delay);
-                                        udp_reciver.add_delay_count.store(
-                                            add_samples,
-                                            std::sync::atomic::Ordering::Relaxed,
-                                        );
-                                        udp_reciver
-                                            .update_delay
-                                            .store(true, std::sync::atomic::Ordering::Relaxed);
-                                    } else {
-                                        let delete_samples =
-                                            (current_sample_delay - new_sample_delay);
-                                        audio.delete_delay_count.store(
-                                            delete_samples,
-                                            std::sync::atomic::Ordering::Relaxed,
-                                        );
-                                        audio
-                                            .update_delay
-                                            .store(true, std::sync::atomic::Ordering::Relaxed);
-                                    }
-                                    audio.current_delay.store(
-                                        new_sample_delay,
-                                        std::sync::atomic::Ordering::Relaxed,
-                                    );
                                 }
-                                send_message
-                                    .send(GuiMessage::Log(
-                                        "Received DELAY message from server. New delay: "
-                                            .to_string()
-                                            + &new_sample_delay.to_string(),
-                                    ))
-                                    .unwrap();
-                            }
-                            _ => {
-                                send_message
-                                    .send(GuiMessage::Log(
-                                        "Received unknown message from server".to_string()
-                                            + msg.as_ref(),
-                                    ))
-                                    .unwrap();
+                                message if message.contains("DELAY") => {
+                                    let new_sample_delay =
+                                        message.split(":").collect::<Vec<&str>>()[1]
+                                            .trim()
+                                            .parse()
+                                            .unwrap();
+                                    let current_sample_delay = audio
+                                        .current_delay
+                                        .load(std::sync::atomic::Ordering::Relaxed);
+                                    if current_sample_delay != new_sample_delay {
+                                        if new_sample_delay > current_sample_delay {
+                                            let add_samples =
+                                                (new_sample_delay - current_sample_delay);
+                                            udp_reciver.add_delay_count.store(
+                                                add_samples,
+                                                std::sync::atomic::Ordering::Relaxed,
+                                            );
+                                            udp_reciver
+                                                .update_delay
+                                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                                        } else {
+                                            let delete_samples =
+                                                (current_sample_delay - new_sample_delay);
+                                            audio.delete_delay_count.store(
+                                                delete_samples,
+                                                std::sync::atomic::Ordering::Relaxed,
+                                            );
+                                            audio
+                                                .update_delay
+                                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                        audio.current_delay.store(
+                                            new_sample_delay,
+                                            std::sync::atomic::Ordering::Relaxed,
+                                        );
+                                    }
+                                    send_message
+                                        .send(ServerMessage::Log(
+                                            "Received DELAY message from server. New delay: "
+                                                .to_string()
+                                                + &new_sample_delay.to_string(),
+                                        ))
+                                        .unwrap();
+                                }
+                                _ => {
+                                    send_message
+                                        .send(ServerMessage::Log(
+                                            "Received unknown message from server".to_string()
+                                                + msg.as_ref(),
+                                        ))
+                                        .unwrap();
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        // break;
+                        Err(e) => {
+                            // break;
+                        }
                     }
                 }
             }
@@ -190,7 +215,7 @@ impl Server {
     pub fn stop(&mut self) {}
 
     pub fn new(
-        send_message: crossbeam_channel::Sender<GuiMessage>,
+        send_message: crossbeam_channel::Sender<ServerMessage>,
         recv_message: crossbeam_channel::Receiver<GuiMessage>,
         stop_bool: Arc<AtomicBool>,
     ) -> Self {
@@ -207,7 +232,7 @@ impl Server {
             }
             None => {
                 send_message
-                    .send(GuiMessage::ServerError(
+                    .send(ServerMessage::Log(
                         "Unable to get local IP address".to_string(),
                     ))
                     .unwrap();

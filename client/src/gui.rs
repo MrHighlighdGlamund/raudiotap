@@ -1,5 +1,5 @@
 use crate::components::server::Server;
-use crate::utilities::enmus::GuiMessage;
+use crate::utilities::enmus::*;
 // use android_activity::AndroidApp;
 use egui::{Context, Image, ScrollArea, TextBuffer, TextureHandle};
 use egui_wgpu::winit::Painter;
@@ -24,12 +24,14 @@ const INITIAL_HEIGHT: u32 = 1080;
 struct gui_params {
     underrun_count: u32,
     message: Vec<String>,
+    is_running: bool,
 }
 impl gui_params {
     fn new() -> Self {
         Self {
             underrun_count: 0,
             message: Vec::new(),
+            is_running: false,
         }
     }
 }
@@ -37,53 +39,37 @@ impl gui_params {
 fn gui_build(
     ctx: &egui::Context,
     sender: &mut crossbeam_channel::Sender<GuiMessage>,
-    receiver: &mut crossbeam_channel::Receiver<GuiMessage>,
+    receiver: &mut crossbeam_channel::Receiver<ServerMessage>,
     gui_params: &mut gui_params,
 ) {
     egui::CentralPanel::default().show(ctx, |ui| {
         let duration = std::time::Instant::now();
         if let Ok(msg) = receiver.try_recv() {
             match msg {
-                GuiMessage::BufferUnderrun => {
-                    gui_params.underrun_count += 1;
-                }
-                GuiMessage::ServerError(msg) => {
+                ServerMessage::Log(msg) => {
                     gui_params.message.push(msg);
                 }
-                GuiMessage::Log(msg) => {
-                    gui_params.message.push(msg);
-                }
-                _ => println!("Unknown message"),
+                _ => return,
             }
         }
 
         ui.group(|ui| {
             ui.label(format!("RaudioTap by MrHighlightGlamund"));
-            ui.button("Start Audio Service");
-            // let img_size = image.size_vec2();
-            // let img_height = img_size.y;
-            // let img_width = img_size.x;
-
-            // // Get the available width and height
-            // let available_width = ui.available_width();
-            // let available_height = ui.available_height();
-
-            // // Calculate the aspect ratio of the image
-            // let aspect_ratio = img_width as f32 / img_height as f32;
-
-            // // Scale the image to fit the available space while keeping the aspect ratio
-            // let (scaled_width, scaled_height) =
-            //     if available_width / aspect_ratio <= available_height {
-            //         // Scale by width if width-based scaling fits within the height
-            //         (available_width, available_width / aspect_ratio)
-            //     } else {
-            //         // Scale by height if height-based scaling fits within the width
-            //         (available_height * aspect_ratio, available_height)
-            //     };
-            // ui.image(
-            //     image,
-            //     egui::Vec2::new(scaled_width, scaled_height),
-            // );
+            ui.add_sized(
+                [ui.available_width(), ui.available_height() / 2.0],
+                egui::Button::new("Start"),
+            )
+            .clicked()
+            .then(|| {
+                if gui_params.is_running {
+                    sender.send(GuiMessage::Stop).unwrap();
+                    gui_params.is_running = false;
+                }
+                else {
+                    sender.send(GuiMessage::Start).unwrap();
+                    gui_params.is_running = true;
+                }
+            })
         });
 
         ui.group(|ui| {
@@ -110,7 +96,7 @@ fn gui_build(
 pub fn gui_thread(
     event_loop: EventLoop<Event>,
     sender: crossbeam_channel::Sender<GuiMessage>,
-    receiver: crossbeam_channel::Receiver<GuiMessage>,
+    receiver: crossbeam_channel::Receiver<ServerMessage>,
     stop: Arc<AtomicBool>,
 ) {
     // let mut server = Server::new();

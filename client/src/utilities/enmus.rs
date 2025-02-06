@@ -1,6 +1,9 @@
 pub enum GuiMessage {
-        BufferUnderrun,
-        TextError(String),
-        Log(String),
-        ServerError(String),
-    }
+    Start,
+    Stop,
+}
+pub enum ServerMessage {
+    Log(String),
+    Connected,
+    Disconnected,
+}

@@ -8,12 +8,12 @@ use std::{
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::utilities::enmus::GuiMessage;
+use crate::utilities::enmus::*;
 
 pub struct Audio {
     audio_stream: Option<cpal::Stream>,
     stop_bool: Arc<AtomicBool>,
-    send_message: crossbeam_channel::Sender<GuiMessage>,
+    send_message: crossbeam_channel::Sender<ServerMessage>,
     pub current_delay: Arc<AtomicU32>,
     pub update_delay: Arc<AtomicBool>,
     pub delete_delay_count: Arc<AtomicU32>,
@@ -99,7 +99,7 @@ impl Audio {
         self.stop_bool
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
-    pub fn new(send_message: crossbeam_channel::Sender<GuiMessage>) -> Self {
+    pub fn new(send_message: crossbeam_channel::Sender<ServerMessage>) -> Self {
         Self {
             audio_stream: None,
             stop_bool: Arc::new(AtomicBool::new(false)),
