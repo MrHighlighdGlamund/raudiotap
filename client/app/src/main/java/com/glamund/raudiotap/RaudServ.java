@@ -67,7 +67,15 @@ public class RaudServ extends Service {
         // Intent to stop the service when the "Stop" button is clicked
         Intent stopIntent = new Intent(this, RaudServ.class);
         stopIntent.setAction("STOP_SERVICE");  // Custom action to stop the service
-        PendingIntent stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        // PendingIntent stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent stopPendingIntent = PendingIntent.getService(
+    this, 
+    0, 
+    stopIntent, 
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S 
+        ? PendingIntent.FLAG_IMMUTABLE 
+        : PendingIntent.FLAG_UPDATE_CURRENT
+);
 
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -22,16 +22,20 @@ use std::time::Duration;
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
 struct gui_params {
-    underrun_count: u32,
     message: Vec<String>,
-    is_running: bool,
+    client_state: ClientSate,
+    button_color: egui::Color32,
+    button_label: String,
+    client_delay: f32,
 }
 impl gui_params {
     fn new() -> Self {
         Self {
-            underrun_count: 0,
             message: Vec::new(),
-            is_running: false,
+            client_state: ClientSate::Disconnected,
+            button_color: egui::Color32::from_rgb(43, 42, 51),
+            button_label: String::new(),
+            client_delay: 0.0,
         }
     }
 }
@@ -49,27 +53,124 @@ fn gui_build(
                 ServerMessage::Log(msg) => {
                     gui_params.message.push(msg);
                 }
+                ServerMessage::Connected => {
+                    gui_params.client_state = ClientSate::Connected;
+                }
+                ServerMessage::Disconnected => {
+                    gui_params.client_state = ClientSate::Disconnected;
+                }
+                ServerMessage::Started => {
+                    gui_params.client_state = ClientSate::Running;
+                }
+                ServerMessage::Stopped => {
+                    gui_params.client_state = ClientSate::Connected;
+                }
+                ServerMessage::Delay(delay) => {
+                    gui_params.client_delay = delay;
+                }
                 _ => return,
+            }
+        }
+        match gui_params.client_state {
+            ClientSate::Disconnected => {
+                gui_params.button_label = "DISCONNECTED".to_string();
+                gui_params.button_label.push_str(":Searching for host...");
+                gui_params.button_color = egui::Color32::from_rgb(0, 0, 0);
+            }
+            ClientSate::Connected => {
+                gui_params.button_label = "CONNECTED".to_string();
+                gui_params.button_label.push_str(":Press to Start");
+                gui_params.button_color = egui::Color32::from_rgb(43, 0, 0);
+            }
+            ClientSate::Running => {
+                gui_params.button_label = "RUNNING".to_string();
+                gui_params.button_label.push_str(":Press to Stop");
+                gui_params.button_color = egui::Color32::from_rgb(0, 39, 0);
             }
         }
 
         ui.group(|ui| {
-            ui.label(format!("RaudioTap by MrHighlightGlamund"));
             ui.add_sized(
                 [ui.available_width(), ui.available_height() / 2.0],
-                egui::Button::new("Start"),
+                egui::Button::new(&gui_params.button_label).fill(gui_params.button_color),
             )
             .clicked()
-            .then(|| {
-                if gui_params.is_running {
-                    sender.send(GuiMessage::Stop).unwrap();
-                    gui_params.is_running = false;
-                }
-                else {
+            .then(|| match gui_params.client_state {
+                ClientSate::Connected => {
                     sender.send(GuiMessage::Start).unwrap();
-                    gui_params.is_running = true;
                 }
+                ClientSate::Running => {
+                    sender.send(GuiMessage::Stop).unwrap();
+                }
+                _ => {}
             })
+        });
+        ui.group(|ui| {
+            let ava_size = ui.available_size();
+            let buttonsize = egui::vec2(
+                ava_size.x / 8.0 - (ui.spacing().item_spacing.x),
+                ava_size.y / 8.0 - ui.spacing().item_spacing.y,
+            );
+            let dragv_size = egui::vec2(
+                ava_size.x - 2.0 * (ava_size.x / 4.0) ,
+                ava_size.y / 8.0 - ui.spacing().item_spacing.y,
+            );
+            ui.horizontal(|ui| {
+                ui.add_sized(buttonsize, egui::Button::new("<<<<<"))
+                    .clicked()
+                    .then(|| {
+                        if gui_params.client_delay > 0.0 {
+                            gui_params.client_delay -= 0.10;
+                            sender
+                                .send(GuiMessage::Delay(gui_params.client_delay))
+                                .unwrap();
+                        }
+                    });
+                ui.add_sized(buttonsize, egui::Button::new("<<<"))
+                    .clicked()
+                    .then(|| {
+                        if gui_params.client_delay > 0.0 {
+                            gui_params.client_delay -= 0.01;
+                            sender
+                                .send(GuiMessage::Delay(gui_params.client_delay))
+                                .unwrap();
+                        }
+                    });
+                ui.add_sized(
+                    dragv_size,
+                    egui::DragValue::new(&mut gui_params.client_delay)
+                        .clamp_range(0.0..=2000.0)
+                        .suffix("  Delay ms")
+                        .speed(0.80),
+                )
+                .drag_released()
+                .then(|| {
+                    sender
+                        .send(GuiMessage::Delay(gui_params.client_delay))
+                        .unwrap();
+                });
+
+                ui.add_sized(buttonsize, egui::Button::new(">>>"))
+                    .clicked()
+                    .then(|| {
+                        if gui_params.client_delay < 2000.0 {
+                            gui_params.client_delay += 0.01;
+                            sender
+                                .send(GuiMessage::Delay(gui_params.client_delay))
+                                .unwrap();
+                        }
+                    });
+                ui.add_sized(buttonsize, egui::Button::new(">>>>>"))
+                    .clicked()
+                    .then(|| {
+                        if gui_params.client_delay < 2000.0 {
+                            gui_params.client_delay += 0.10;
+                            sender
+                                .send(GuiMessage::Delay(gui_params.client_delay))
+                                .unwrap();
+                        }
+                    });
+            });
         });
 
         ui.group(|ui| {
@@ -89,7 +190,7 @@ fn gui_build(
                 });
         });
 
-        // thread::sleep(Duration::from_millis(16) - duration.elapsed());
+        thread::sleep(Duration::from_millis(16) - duration.elapsed());
     });
 }
 
@@ -127,7 +228,7 @@ pub fn gui_thread(
     );
     let mut window: Option<winit::window::Window> = None;
     let stop = stop.clone();
-    let thread = std::thread::spawn(move || {});
+    // let thread = std::thread::spawn(move || {});
     event_loop.run(move |event, event_loop, control_flow| {
         match event {
             Resumed => match window {

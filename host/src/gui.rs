@@ -33,7 +33,6 @@ pub fn gui(
     mut recv_message: Option<crossbeam_channel::Receiver<GuiMessage>>,
     recv_clients: crossbeam_channel::Receiver<Client>,
     sample_rate: Arc<AtomicU32>,
-
 ) -> Option<Box<dyn Editor>> {
     let params = plugin.params.clone();
     let egui_state = params.editor_state.clone();
@@ -99,53 +98,52 @@ pub fn gui(
                     }
                     ui.group(|ui| {
                         let size = ui.available_size();
-                        let button_size = Vec2::new(size.x / 4.0 - ui.spacing().item_spacing.x, size.y / 8.0);
+                        let button_size =
+                            Vec2::new(size.x / 4.0 - ui.spacing().item_spacing.x, size.y / 8.0);
                         let drag_value_size = Vec2::new(
                             size.x - 2.0 * (size.x / 4.0) - ui.spacing().item_spacing.x,
                             size.y / 8.0 - ui.spacing().item_spacing.y,
                         );
                         ui.horizontal(|ui| {
-                            ui.add_sized(
-                                button_size,
-                                egui::Button::new("<<<"),
-                            ).clicked().then(|| {
-                                if udp_chunk_size.load(Ordering::Acquire) <= 2 {
-                                    return;
-                                }
-                                let new_chunk_size = udp_chunk_size.load(Ordering::Acquire) / 2;
-                                udp_chunk_size.store(new_chunk_size, Ordering::Release);
-                                for client in clients.iter_mut() {
-                                    client.sender.send(ClientMessage::UdpChunkSize(new_chunk_size)).unwrap();
-                                }
-                            });
+                            ui.add_sized(button_size, egui::Button::new("<<<"))
+                                .clicked()
+                                .then(|| {
+                                    if udp_chunk_size.load(Ordering::Acquire) <= 2 {
+                                        return;
+                                    }
+                                    let new_chunk_size = udp_chunk_size.load(Ordering::Acquire) / 2;
+                                    udp_chunk_size.store(new_chunk_size, Ordering::Release);
+                                    for client in clients.iter_mut() {
+                                        client
+                                            .sender
+                                            .send(ClientMessage::UdpChunkSize(new_chunk_size))
+                                            .unwrap();
+                                    }
+                                });
                             ui.add_sized(
                                 drag_value_size,
                                 egui::Label::new(format!(
                                     "UDP Chunk Size: {}",
                                     udp_chunk_size.load(Ordering::Relaxed)
                                 )),
-                                
                             );
-                            ui.add_sized(
-                                button_size,
-                                egui::Button::new(">>>"),
-                            ).clicked().then(|| {
-                                if udp_chunk_size.load(Ordering::Acquire) >= 32768 /2 {
-                                    return;
-                                }
-                                let new_chunk_size = udp_chunk_size.load(Ordering::Acquire) * 2;
-                                udp_chunk_size.store(new_chunk_size, Ordering::Release);
-                                for client in clients.iter_mut() {
-                                    client.sender.send(ClientMessage::UdpChunkSize(new_chunk_size)).unwrap();
-                                }
-                            });
-
+                            ui.add_sized(button_size, egui::Button::new(">>>"))
+                                .clicked()
+                                .then(|| {
+                                    if udp_chunk_size.load(Ordering::Acquire) >= 32768 / 2 {
+                                        return;
+                                    }
+                                    let new_chunk_size = udp_chunk_size.load(Ordering::Acquire) * 2;
+                                    udp_chunk_size.store(new_chunk_size, Ordering::Release);
+                                    for client in clients.iter_mut() {
+                                        client
+                                            .sender
+                                            .send(ClientMessage::UdpChunkSize(new_chunk_size))
+                                            .unwrap();
+                                    }
+                                });
                         });
-
-
-                        
                     });
-
 
                     ui.group(|ui| {
                         let mut start_client = false;
@@ -171,7 +169,6 @@ pub fn gui(
                                     ClientMessage::Start => {
                                         client.sender.send(ClientMessage::Start).unwrap();
                                         client.is_running = true;
-                                        
                                     }
                                     ClientMessage::Stop => {
                                         client.sender.send(ClientMessage::Stop).unwrap();
@@ -179,7 +176,19 @@ pub fn gui(
                                     }
                                     ClientMessage::Ping(ping) => {
                                         client.ping = ping;
-                                        
+                                    }
+                                    ClientMessage::Delay(delay) => {
+                                        client.delay.store(delay, Ordering::Release);
+
+                                        client
+                                            .delay
+                                            .store(delay, Ordering::Release);
+                                        client
+                                            .sender
+                                            .send(ClientMessage::Delay(
+                                                client.delay.load(Ordering::Acquire),   
+                                            ))
+                                            .unwrap();
                                     }
                                     _ => {}
                                 }
@@ -218,14 +227,13 @@ pub fn gui(
                                     }
 
                                     ui.group(|ui| {
-                                        let mut delay_in_ms =
-                                            client.delay_in_ms.load(Ordering::Relaxed);
+                                        let mut delay = client.delay.load(Ordering::Acquire);
                                         let result = ui.add_sized(
                                             [
                                                 ui.available_width() - ui.spacing().item_spacing.x,
                                                 ui.available_height() - ui.spacing().item_spacing.y,
                                             ],
-                                            egui::DragValue::new(&mut delay_in_ms)
+                                            egui::DragValue::new(&mut delay)
                                                 .clamp_range(0.0..=2000.0)
                                                 .suffix(" ms")
                                                 .speed(0.80),
@@ -234,23 +242,13 @@ pub fn gui(
                                             client
                                                 .sender
                                                 .send(ClientMessage::Delay(
-                                                    client.delay_in_samples.load(Ordering::Relaxed),
+                                                    client.delay.load(Ordering::Acquire),
                                                 ))
                                                 .unwrap();
                                         }
 
                                         if result.changed() {
-                                            let sample_rate = sample_rate.load(Ordering::Relaxed);
-                                            let delay_in_samples = (delay_in_ms as f32 / 1000.0
-                                                * sample_rate as f32
-                                                * 2.0)
-                                                as u32;
-                                            client
-                                                .delay_in_ms
-                                                .store(delay_in_ms, Ordering::Relaxed);
-                                            client
-                                                .delay_in_samples
-                                                .store(delay_in_samples, Ordering::Relaxed);
+                                            client.delay.store(delay, Ordering::Release);
                                         }
                                     });
                                 });

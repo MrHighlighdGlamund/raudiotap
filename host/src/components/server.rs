@@ -105,7 +105,7 @@ impl Server {
                     let udp_chunk_size = udp_chunk_size.clone();
                     let chunk_msg =
                         format!("UDP_CHUNK_SIZE:{}", udp_chunk_size.load(Ordering::Acquire));
-                    
+
                     tokio::spawn(async move {
                         handle_client(
                             stream,
@@ -209,7 +209,6 @@ async fn handle_client(
 
                                 match command {
                                     "CONNECT" => {
-
                                         let data = message_parts[1].to_string();
                                         let mut client_ip = stream.peer_addr().unwrap();
                                         client_ip.set_port(8000);
@@ -227,13 +226,14 @@ async fn handle_client(
                                         let _ = send_client.send(new_client);
                                     }
                                     "CLIENTSTART" => {
-
                                         send_to_gui.send(ClientMessage::Start).unwrap();
-
-
                                     }
                                     "CLIENTSTOP" => {
                                         send_to_gui.send(ClientMessage::Stop).unwrap();
+                                    }
+                                    "CLIENTDELAY" => {
+                                        let delay:f32 = message_parts[1].parse().unwrap();
+                                        send_to_gui.send(ClientMessage::Delay(delay));   
                                     }
 
                                     _ => {

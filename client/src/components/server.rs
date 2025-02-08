@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
@@ -63,6 +64,7 @@ impl Server {
                 tcp_stream
                     .set_read_timeout(Some(std::time::Duration::from_millis(100)))
                     .unwrap();
+                send_message.send(ServerMessage::Connected).unwrap();
 
                 let mut msg = [0; 512];
                 loop {
@@ -79,6 +81,11 @@ impl Server {
                             GuiMessage::Stop => {
                                 let command = "CLIENTSTOP".to_string();
                                 tcp_stream.write_all(command.as_bytes()).unwrap();
+                            }
+                            GuiMessage::Delay(delay) => {
+                                tcp_stream
+                                    .write_all(format!("CLIENTDELAY:{}", delay).as_bytes())
+                                    .unwrap();
                             }
                         }
                     };
@@ -103,6 +110,7 @@ impl Server {
                                             message_parts[1].trim().parse().unwrap(),
                                             std::sync::atomic::Ordering::Release,
                                         );
+
                                         send_message
                                             .send(ServerMessage::Log(
                                                 "Received START message from server".to_string(),
@@ -115,7 +123,9 @@ impl Server {
                                         audio.run(consumer);
                                         // std::thread::sleep(std::time::Duration::from_millis(300));
                                         udp_reciver.run(producer);
+                                        send_message.send(ServerMessage::Started).unwrap();
                                     }
+
                                     "STOP" => {
                                         send_message
                                             .send(ServerMessage::Log(
@@ -124,6 +134,7 @@ impl Server {
                                             .unwrap();
                                         audio.stop();
                                         udp_reciver.stop();
+                                        send_message.send(ServerMessage::Stopped).unwrap();
                                     }
                                     "SAMPLERATE" => {
                                         let new_sample_rate: u32 = match message_parts[1]
@@ -172,15 +183,28 @@ impl Server {
                                     }
 
                                     "DELAY" => {
-                                        let new_sample_delay =
+                                        let sample_rate = audio
+                                            .sample_rate
+                                            .load(std::sync::atomic::Ordering::Acquire);
+
+                                        let new_delay: f32 =
                                             message_parts[1].trim().parse().unwrap();
+                                        send_message
+                                    .send(ServerMessage::Delay(
+                                        new_delay
+                                    ))
+                                    .unwrap();
+                                        
+                                        let delay_in_samples =
+                                            (new_delay as f32 / 1000.0 * sample_rate as f32 * 2.0)
+                                                as u32;
                                         let current_sample_delay = audio
                                             .current_delay
                                             .load(std::sync::atomic::Ordering::Acquire);
-                                        if current_sample_delay != new_sample_delay {
-                                            if new_sample_delay > current_sample_delay {
+                                        if current_sample_delay != delay_in_samples {
+                                            if delay_in_samples > current_sample_delay {
                                                 let add_samples =
-                                                    (new_sample_delay - current_sample_delay);
+                                                    (delay_in_samples - current_sample_delay);
                                                 udp_reciver.add_delay_count.store(
                                                     add_samples,
                                                     std::sync::atomic::Ordering::Release,
@@ -195,7 +219,7 @@ impl Server {
                                                 );
                                             } else {
                                                 let delete_samples =
-                                                    (current_sample_delay - new_sample_delay);
+                                                    (current_sample_delay - delay_in_samples);
                                                 audio.delete_delay_count.store(
                                                     delete_samples,
                                                     std::sync::atomic::Ordering::Release,
@@ -210,17 +234,10 @@ impl Server {
                                                 );
                                             }
                                             audio.current_delay.store(
-                                                new_sample_delay,
+                                                delay_in_samples,
                                                 std::sync::atomic::Ordering::Relaxed,
                                             );
                                         }
-                                        send_message
-                                            .send(ServerMessage::Log(
-                                                "Received DELAY message from server. New delay: "
-                                                    .to_string()
-                                                    + &new_sample_delay.to_string(),
-                                            ))
-                                            .unwrap();
                                     }
 
                                     _ => {
@@ -268,7 +285,17 @@ impl Server {
             }
         }
 
-        let local_ip = get_local_ip_address().unwrap();
+        let local_ip = match get_local_ip_address() {
+            Ok(ip) => ip,
+            Err(e) => {
+                send_message
+                    .send(ServerMessage::Log(
+                        "Unable to get local IP address".to_string(),
+                    ))
+                    .unwrap();
+                "127.0.0.1".to_string()
+            }
+        };
 
         let ipchunk = local_ip.split(".").collect::<Vec<&str>>()[0..3].join(".");
         let ipchunk = ipchunk + ".";

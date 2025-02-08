@@ -11,7 +11,7 @@ cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ build --release
 
 # Optionally sign the APK (if not already handled in Gradle)
 # ./gradlew bundleRelease or sign the APK manually
-# adb uninstall com.glamund.raudiotap
+adb uninstall com.glamund.raudiotap
 # Install the release APK on the device (modify path if needed)
 adb install app/build/outputs/apk/release/app-release.apk
 

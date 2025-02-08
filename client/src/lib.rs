@@ -128,11 +128,11 @@ pub extern "C" fn Java_com_glamund_raudiotap_RustCall_stop_1audio_1service(
     env: JNIEnv,
     _: JObject,
 ) {
-    STOP_BACKGROUND_SERVICE
-        .get()
-        .unwrap()
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    std::process::exit(0);
+    // STOP_BACKGROUND_SERVICE
+    //     .get()
+    //     .unwrap()
+    //     .store(true, std::sync::atomic::Ordering::SeqCst);
+    // std::process::exit(0);
 
     // Implementation of the start_audio_service function
 }
