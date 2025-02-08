@@ -18,6 +18,7 @@ dependencies = [
  "jni",
  "local-ip-addr",
  "log",
+ "ndk-context",
  "pollster",
  "rtrb",
 ]

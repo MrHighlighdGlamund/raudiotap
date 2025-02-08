@@ -1,11 +1,14 @@
 use components::server::Server;
 use egui_wgpu::wgpu;
 use egui_winit::winit;
+use log::warn;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
 use utilities::enmus::*;
+use ndk_context::android_context;
+use jni::objects::{JClass, JObject, JString, JValue};
 
-use jni::{objects::JObject, sys::JNIEnv};
+use jni::JNIEnv;
 // use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 pub mod gui;
 
@@ -64,12 +67,12 @@ fn android_main(app: AndroidApp) {
 
     android_logger::init_once(
         android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Trace) // Default comes from `log::max_level`, i.e. Off
+            .with_max_level(log::LevelFilter::Error) // Default comes from `log::max_level`, i.e. Off
             .with_filter(
                 android_logger::FilterBuilder::new()
-                    .filter_level(log::LevelFilter::Debug)
-                    //.filter_module("android_activity", log::LevelFilter::Trace)
-                    //.filter_module("winit", log::LevelFilter::Trace)
+                    .filter_level(log::LevelFilter::Error)
+                    //.filter_module("android_activity", log::LevelFilter::Error)
+                    //.filter_module("winit", log::LevelFilter::Error)
                     .build(),
             ),
     );
@@ -91,7 +94,7 @@ fn android_main(app: AndroidApp) {
 fn main() {
     initialize_channels();
     env_logger::builder()
-        .filter_level(log::LevelFilter::Warn) // Default Log Level
+        .filter_level(log::LevelFilter::Error) // Default Log Level
         .parse_default_env()
         .init();
 
@@ -127,12 +130,13 @@ pub extern "C" fn Java_com_glamund_raudiotap_RustCall_start_1audio_1service(
 pub extern "C" fn Java_com_glamund_raudiotap_RustCall_stop_1audio_1service(
     env: JNIEnv,
     _: JObject,
-) {
-    // STOP_BACKGROUND_SERVICE
-    //     .get()
-    //     .unwrap()
-    //     .store(true, std::sync::atomic::Ordering::SeqCst);
-    // std::process::exit(0);
+)  {
+    STOP_BACKGROUND_SERVICE
+        .get()
+        .unwrap()
+        .store(true, std::sync::atomic::Ordering::Release);
+    
 
     // Implementation of the start_audio_service function
 }
+

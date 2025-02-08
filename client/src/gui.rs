@@ -228,7 +228,6 @@ pub fn gui_thread(
     );
     let mut window: Option<winit::window::Window> = None;
     let stop = stop.clone();
-    // let thread = std::thread::spawn(move || {});
     event_loop.run(move |event, event_loop, control_flow| {
         match event {
             Resumed => match window {

@@ -6,7 +6,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.*;
 import android.util.Log;
-
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 public class RaudServ extends Service {
 
     private static final String CHANNEL_ID = "ForegroundServiceChannel";
@@ -15,6 +17,7 @@ public class RaudServ extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        startRustService();
         createNotificationChannel();
     }
 
@@ -40,6 +43,10 @@ public class RaudServ extends Service {
             stopForeground(true); // Remove the foreground status
             stopSelf(); // Stop the service
             stopService();
+
+                // RustCall.stop_audio_service();
+                        // Intent stopMainIntent = new Intent("CLOSE_MAIN_ACTIVITY");
+            // sendBroadcast(stopMainIntent);
             return START_NOT_STICKY; // Prevent the service from being restarted
         }
 
@@ -50,7 +57,6 @@ public class RaudServ extends Service {
         Log.d("RaudServ", "Foreground service started with notification");
 
         // Start Rust service
-        startRustService();
 
         return START_NOT_STICKY;
     }
@@ -98,12 +104,14 @@ public class RaudServ extends Service {
 
     public static void stopService() {
 
-        RustCall.stop_audio_service();
+                RustCall.stop_audio_service();
     }
     public void onDestroy() {
         RustCall.stop_audio_service();
+        
         super.onDestroy();
-        Log.d("RaudServ", "Service is being destroyed.");
+                Intent stopMainIntent = new Intent("CLOSE_MAIN_ACTIVITY");
+    sendBroadcast(stopMainIntent);
     }
 }
 

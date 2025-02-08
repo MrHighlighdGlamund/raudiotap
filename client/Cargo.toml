@@ -10,7 +10,8 @@ resolver = "2"
 log = "0.4"
 pollster = "0.2"
 chrono = "0.4"
-egui = { version = "0.23.0", features = [ "log" ] }
+# egui = { version = "0.23.0", features = [ "log" ] }
+egui = "0.23.0"
 egui-wgpu = { version = "0.23.0", features = [ "winit" ] }
 egui-winit = { version = "0.23.0", default-features = true, features = [ "android-game-activity" ] }
 egui_demo_lib = "0.23.0"
@@ -19,6 +20,7 @@ crossbeam-channel = "0.5.14"
 cpal = { version = "0.15.2", features = ["oboe-shared-stdcxx"] }
 rtrb = "0.3.2"
 local-ip-addr = "0.1.1"
+ndk-context = "0.1.1"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 env_logger = "0.10"
 

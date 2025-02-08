@@ -32,9 +32,16 @@ impl Server {
             let mut audio = Audio::new(send_message.clone());
             let mut udp_reciver = UdpReciver::new(send_message.clone());
             // find host
+            //
             loop {
                 while tcp_stream.is_none() {
+                    if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
                     for ip in test_ips.iter() {
+                        if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
                         if std::net::TcpStream::connect_timeout(
                             ip,
                             std::time::Duration::from_millis(40),
@@ -60,6 +67,9 @@ impl Server {
                 }
                 // Connected to Host
 
+if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
                 let mut tcp_stream = tcp_stream.take().expect("tcp_stream is none");
                 tcp_stream
                     .set_read_timeout(Some(std::time::Duration::from_millis(100)))
@@ -189,12 +199,8 @@ impl Server {
 
                                         let new_delay: f32 =
                                             message_parts[1].trim().parse().unwrap();
-                                        send_message
-                                    .send(ServerMessage::Delay(
-                                        new_delay
-                                    ))
-                                    .unwrap();
-                                        
+                                        send_message.send(ServerMessage::Delay(new_delay)).unwrap();
+
                                         let delay_in_samples =
                                             (new_delay as f32 / 1000.0 * sample_rate as f32 * 2.0)
                                                 as u32;
@@ -255,6 +261,8 @@ impl Server {
                     }
                 }
             }
+            // stop_bool.store(false, std::sync::atomic::Ordering::Release);
+            std::process::exit(1);
         }));
     }
 

@@ -14,10 +14,19 @@ import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.content.Context;
+import android.content.IntentFilter;
 
+import android.content.BroadcastReceiver;
 import android.util.Log;
 
 public class MainActivity extends GameActivity {
+private BroadcastReceiver closeActivityReceiver = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        finish();  // Close MainActivity when service stops
+    }
+};
 
     static {
         // Load the STL first to workaround issues on old Android versions:
@@ -66,15 +75,20 @@ public class MainActivity extends GameActivity {
         Intent serviceIntent = new Intent(this, RaudServ.class);
         startService(serviceIntent);
 
+        registerReceiver(closeActivityReceiver, new IntentFilter("CLOSE_MAIN_ACTIVITY"));
+
     }
  
     @Override
     protected void onDestroy() {
-        // RustCall.stop_audio_service();
-
+// Intent stopIntent = new Intent(this, RaudServ.class);
+//         stopIntent.setAction("STOP_SERVICE");
+//         stopService(stopIntent);
+        RustCall.stop_audio_service();
 Intent serviceIntent = new Intent(this, RaudServ.class);
         stopService(serviceIntent);
         super.onDestroy();
+        
 
     }
     @Override
@@ -89,3 +103,4 @@ Intent serviceIntent = new Intent(this, RaudServ.class);
         return pm.hasSystemFeature("com.google.android.play.feature.HPE_EXPERIENCE");
     }
 }
+
