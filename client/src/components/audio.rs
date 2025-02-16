@@ -64,19 +64,6 @@ impl Audio {
                                 }
                                 Err(_) =>  {
                                     *sample = 0;
-                                    // // send_message.send(GuiMessage::BufferUnderrun).unwrap();
-                                    // std::thread::sleep(std::time::Duration::from_millis(1));
-
-                                    // if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
-                                    //     break;
-                                    // }
-                                    // match audio_queue.pop() {
-                                    //     Ok(value) => {
-                                    //         *sample = value;
-                                    //         break;
-                                    //     }
-                                    //     Err(_) => {}
-                                    // }
                                 },
                             }
                         }

@@ -90,7 +90,6 @@ pub fn gui(
                         }
                         _ => {}
                     });
-                    std::thread::sleep(Duration::from_millis(10));
 
                     for new_client in recv_clients.try_iter() {
                         clients.retain_mut(|client| client.udp_addr != new_client.udp_addr);

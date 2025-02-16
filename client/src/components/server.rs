@@ -67,9 +67,9 @@ impl Server {
                 }
                 // Connected to Host
 
-if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
+                if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
                 let mut tcp_stream = tcp_stream.take().expect("tcp_stream is none");
                 tcp_stream
                     .set_read_timeout(Some(std::time::Duration::from_millis(100)))

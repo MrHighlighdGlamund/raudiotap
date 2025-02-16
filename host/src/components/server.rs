@@ -256,7 +256,7 @@ async fn handle_client(
                      ping_fail_count += 1;
                  }
                  else {
-                     break;
+                     // break;
                  }
              }
         }
@@ -276,6 +276,7 @@ async fn ping_ip(ip: &str) -> Option<f32> {
 
     match output {
         Ok(output) => {
+            return None;
             let stdout = String::from_utf8_lossy(&output.stdout);
 
             // Regex to extract ping time (works for Windows & Linux/macOS)

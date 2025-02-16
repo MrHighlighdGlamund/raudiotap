@@ -27,6 +27,7 @@ impl UdpReciver {
         let update = self.update.clone();
         let udp_chunk_size = self.udp_chunk_size.clone();
         // socket.set_nonblocking(true).unwrap();
+        let send_message = self.send_message.clone();
         self.thread_handle = Some(std::thread::spawn(move || loop {
             update.store(false, std::sync::atomic::Ordering::Release);
             if stop_bool.load(std::sync::atomic::Ordering::Acquire) {
@@ -34,7 +35,6 @@ impl UdpReciver {
             }
             let mut buf =
                 vec![0u8; udp_chunk_size.load(std::sync::atomic::Ordering::Acquire) as usize];
-            println!("buf len: {}", buf.len());
             if update_delay.load(std::sync::atomic::Ordering::Acquire) {
                 for _ in 0..add_delay_count.load(std::sync::atomic::Ordering::Acquire) {
                     match audio_queue.push(0) {
@@ -54,11 +54,14 @@ impl UdpReciver {
             let socket = UdpSocket::bind(socket_addr).expect("Could not bind to socket");
 
             socket
-                .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+                .set_read_timeout(Some(std::time::Duration::from_millis(2000)))
+                .unwrap();
+            send_message
+                .send(ServerMessage::Log("UDP_T_START".to_string()))
                 .unwrap();
 
             loop {
-                if update.load(std::sync::atomic::Ordering::Acquire) {
+                if update.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
                 match socket.recv_from(&mut buf) {
@@ -69,9 +72,6 @@ impl UdpReciver {
                     match audio_queue.push(i16::from_le_bytes(chunk.try_into().unwrap())) {
                         Ok(_) => {}
                         Err(_) => loop {
-                            if stop_bool.load(std::sync::atomic::Ordering::Relaxed) {
-                                break;
-                            }
                             match audio_queue.push(i16::from_le_bytes(chunk.try_into().unwrap())) {
                                 Ok(_) => {
                                     break;
